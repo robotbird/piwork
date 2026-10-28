@@ -1,0 +1,142 @@
+"use client";
+
+import { FolderIcon, PanelLeftIcon, Share2Icon } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { memo, useCallback, useState } from "react";
+import useSWR from "swr";
+import { usePreferences } from "@/components/preferences-provider";
+import { type ProjectSummary, request } from "@/components/projects/shared";
+import { Button } from "@/components/ui/button";
+import { useSidebar } from "@/components/ui/sidebar";
+import { useActiveChat } from "@/hooks/use-active-chat";
+import { ParticipantAvatars } from "./participant-avatars";
+import { ShareDialog } from "./share-dialog";
+import type { VisibilityType } from "./visibility-selector";
+
+function PureChatHeader({
+  hasMessages,
+  title,
+  chatId: _chatId,
+  selectedVisibilityType: _selectedVisibilityType,
+  isReadonly: _isReadonly,
+}: {
+  chatId: string;
+  selectedVisibilityType: VisibilityType;
+  isReadonly: boolean;
+  hasMessages: boolean;
+  title: string;
+}) {
+  const { toggleSidebar, isMobile } = useSidebar();
+  const { t } = usePreferences();
+  const pathname = usePathname();
+  const projectId = pathname.match(
+    /^\/projects\/([^/]+)\/chat\/[^/]+\/?$/
+  )?.[1];
+  const { data: projectData } = useSWR<{ project: ProjectSummary }>(
+    projectId ? `/api/projects/${encodeURIComponent(projectId)}` : null,
+    request
+  );
+  const projectName = projectData?.project.name;
+  const {
+    chatId,
+    isReadonly,
+    myRole,
+    onlineUserIds,
+    participants,
+    typingUserIds,
+  } = useActiveChat();
+  const [shareOpen, setShareOpen] = useState(false);
+
+  const handleShareOpen = useCallback(() => setShareOpen(true), []);
+
+  const handleShareClose = useCallback(() => setShareOpen(false), []);
+
+  // 分享是所有者操作：协作成员/只读视图不展示入口
+  const canShare = myRole === "owner" && !isReadonly;
+  const showCollaboration = participants.length > 1;
+
+  return (
+    <header className="relative flex h-14 shrink-0 items-center bg-background px-4 md:px-6">
+      {isMobile ? (
+        <Button
+          aria-label={t("chat.openSidebar")}
+          className="text-foreground/70"
+          onClick={toggleSidebar}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <PanelLeftIcon className="size-[18px]" />
+        </Button>
+      ) : null}
+
+      {hasMessages || projectId ? (
+        <>
+          <div className="flex min-w-0 items-center gap-2.5 text-[15px]">
+            <FolderIcon className="size-[18px] shrink-0 text-muted-foreground" />
+            <span
+              className={
+                projectId
+                  ? "max-w-[min(40vw,280px)] truncate font-medium text-foreground"
+                  : "hidden font-medium text-foreground sm:inline"
+              }
+              title={projectName}
+            >
+              {projectId ? (projectName ?? t("appSidebar.projects")) : "PiWork"}
+            </span>
+            <span className="hidden text-muted-foreground sm:inline">/</span>
+            <span className="max-w-[min(42vw,460px)] truncate text-muted-foreground">
+              {title}
+            </span>
+            <span className="hidden text-muted-foreground/70 sm:inline">
+              · {t("chat.work")}
+            </span>
+          </div>
+          <div className="ml-auto flex items-center gap-1 text-muted-foreground">
+            {showCollaboration ? (
+              <ParticipantAvatars
+                onlineUserIds={onlineUserIds}
+                participants={participants}
+                typingUserIds={typingUserIds}
+              />
+            ) : null}
+            {typingUserIds.length > 0 ? (
+              <span className="hidden max-w-[180px] truncate text-[12px] text-muted-foreground sm:inline">
+                {typingUserIds.length === 1
+                  ? t("chat.collab.typing", {
+                      name:
+                        participants.find((p) => p.userId === typingUserIds[0])
+                          ?.name ?? "",
+                    })
+                  : t("chat.collab.typingMultiple", {
+                      count: typingUserIds.length,
+                    })}
+              </span>
+            ) : null}
+            {canShare ? (
+              <Button
+                aria-label={t("chat.shareConversation")}
+                className="gap-2 px-2.5"
+                onClick={handleShareOpen}
+                size="sm"
+                variant="ghost"
+              >
+                <Share2Icon className="size-[17px]" />
+                <span className="hidden sm:inline">{t("chat.share")}</span>
+              </Button>
+            ) : null}
+          </div>
+        </>
+      ) : null}
+
+      {canShare ? (
+        <ShareDialog
+          chatId={chatId}
+          onClose={handleShareClose}
+          open={shareOpen && hasMessages}
+        />
+      ) : null}
+    </header>
+  );
+}
+
+export const ChatHeader = memo(PureChatHeader);

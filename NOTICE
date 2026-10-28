@@ -1,0 +1,17 @@
+piwork
+Copyright 2026 robotbird
+
+This product includes software developed by robotbird
+(https://github.com/robotbird).
+
+This product is derived in part from the Vercel AI Chatbot template
+(https://github.com/vercel/ai-chatbot), Copyright 2024 Vercel, Inc.,
+used under the Apache License, Version 2.0.
+
+Model catalogs and provider icons in plugins/piwork-llm-* are derived
+in part from the Dify official plugins
+(https://github.com/langgenius/dify-official-plugins), including
+langgenius/deepseek, langgenius/tongyi, and langgenius/zhipuai.
+
+Model provider names and logos are trademarks of their respective
+owners and are not affiliated with piwork.

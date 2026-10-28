@@ -1,0 +1,111 @@
+import { after } from "next/server";
+import { getTranslations } from "next-intl/server";
+import { z } from "zod";
+import { getCurrentUser } from "@/lib/auth/session";
+import {
+  claimScheduledTask,
+  deleteScheduledTask,
+  editScheduledTask,
+  getScheduledTask,
+  listTaskRuns,
+  setTaskEnabled,
+} from "@/lib/db/scheduled-task-queries";
+import { taskApiError } from "@/lib/scheduler/http";
+import { taskInputSchema } from "@/lib/scheduler/validation";
+
+export const maxDuration = 360;
+type Context = { params: Promise<{ id: string }> };
+const missing = (t: (key: string) => string) =>
+  Response.json({ error: t("taskMissing") }, { status: 404 });
+const conflict = (t: (key: string) => string) =>
+  Response.json({ error: t("taskRunning") }, { status: 409 });
+
+export async function GET(_request: Request, { params }: Context) {
+  const t = await getTranslations("api");
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return Response.json({ error: t("signIn") }, { status: 401 });
+    }
+    const id = z.uuid().parse((await params).id);
+    const task = await getScheduledTask(user.id, id);
+    if (!task) {
+      return missing(t);
+    }
+    return Response.json({ runs: await listTaskRuns(user.id, id), task });
+  } catch (error) {
+    return taskApiError(error);
+  }
+}
+
+export async function PATCH(request: Request, { params }: Context) {
+  const t = await getTranslations("api");
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return Response.json({ error: t("signIn") }, { status: 401 });
+    }
+    const id = z.uuid().parse((await params).id);
+    const input = taskInputSchema.parse(await request.json());
+    if (!(await getScheduledTask(user.id, id))) {
+      return missing(t);
+    }
+    const task = await editScheduledTask(user.id, id, input);
+    return task ? Response.json(task) : conflict(t);
+  } catch (error) {
+    return taskApiError(error);
+  }
+}
+
+export async function POST(request: Request, { params }: Context) {
+  const t = await getTranslations("api");
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return Response.json({ error: t("signIn") }, { status: 401 });
+    }
+    const id = z.uuid().parse((await params).id);
+    const { action } = z
+      .object({ action: z.enum(["pause", "resume", "run"]) })
+      .strict()
+      .parse(await request.json());
+    if (!(await getScheduledTask(user.id, id))) {
+      return missing(t);
+    }
+    if (action === "run") {
+      const task = await claimScheduledTask(user.id, id, true);
+      if (!task) {
+        return conflict(t);
+      }
+      after(async () => {
+        // CRUD 不加载模型/沙箱运行时；只有已领取的执行请求需要执行器。
+        const { executeScheduledTask } = await import("@/lib/scheduler/executor");
+        await executeScheduledTask(task);
+      });
+      return Response.json(task, { status: 202 });
+    }
+    const task = await setTaskEnabled(user.id, id, action === "resume");
+    return task ? Response.json(task) : missing(t);
+  } catch (error) {
+    return taskApiError(error);
+  }
+}
+
+export async function DELETE(_request: Request, { params }: Context) {
+  const t = await getTranslations("api");
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return Response.json({ error: t("signIn") }, { status: 401 });
+    }
+    const id = z.uuid().parse((await params).id);
+    if (!(await getScheduledTask(user.id, id))) {
+      return missing(t);
+    }
+    return (await deleteScheduledTask(user.id, id))
+      ? Response.json({ success: true })
+      : conflict(t);
+  } catch (error) {
+    return taskApiError(error);
+  }
+}

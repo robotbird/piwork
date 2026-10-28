@@ -1,0 +1,77 @@
+import { withBotId } from "botid/next/config";
+import type { NextConfig } from "next";
+import createNextIntlPlugin from "next-intl/plugin";
+
+const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
+
+const basePath = process.env.IS_DEMO === "1" ? "/demo" : "";
+
+const nextConfig: NextConfig = {
+  ...(basePath
+    ? {
+        assetPrefix: "/demo-assets",
+        basePath,
+        redirects: async () => [
+          {
+            basePath: false,
+            destination: basePath,
+            permanent: false,
+            source: "/",
+          },
+        ],
+      }
+    : {}),
+  cacheComponents: true,
+  devIndicators: false,
+  // Separate build output supports isolated validation servers without touching an active dev build.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
+  env: {
+    NEXT_PUBLIC_BASE_PATH: basePath,
+  },
+  experimental: {
+    appNewScrollHandler: true,
+    cachedNavigations: true,
+    inlineCss: true,
+    prefetchInlining: true,
+    // Preserve 100 MiB uploads plus multipart overhead through the auth proxy.
+    // Individual upload routes still enforce their own file-size limits.
+    proxyClientMaxBodySize: "128mb",
+    turbopackFileSystemCacheForDev: true,
+  },
+  images: {
+    remotePatterns: [
+      {
+        hostname: "avatar.vercel.sh",
+      },
+      {
+        hostname: "*.public.blob.vercel-storage.com",
+        protocol: "https",
+      },
+    ],
+  },
+  logging: {
+    fetches: {
+      fullUrl: false,
+    },
+    incomingRequests: false,
+  },
+  poweredByHeader: false,
+  reactCompiler: true,
+  // pi-coding-agent 在服务端 spawn npm CLI 并动态 require 原生模块,不做打包
+  serverExternalPackages: [
+    "@earendil-works/pi-coding-agent",
+    "officeparser",
+    "esbuild",
+  ],
+  // pi-auto-router publishes TypeScript sources, including the pure classifier.
+  transpilePackages: ["pi-auto-router"],
+  typescript: {
+    tsconfigPath: process.env.NEXT_TSCONFIG_PATH || "tsconfig.json",
+  },
+};
+
+// BotID 仅在显式开启时注入挑战脚本重写；非 Vercel 自托管默认关闭，
+// 理由见 instrumentation-client.ts（非安全上下文会阻断 /api/chat）。
+const botIdEnabled = process.env.NEXT_PUBLIC_BOTID_ENABLED === "1";
+
+export default withNextIntl(botIdEnabled ? withBotId(nextConfig) : nextConfig);

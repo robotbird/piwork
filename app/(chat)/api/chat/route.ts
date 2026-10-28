@@ -1,0 +1,825 @@
+import { geolocation } from "@vercel/functions";
+import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
+import { checkBotId } from "botid/server";
+import { getTranslations } from "next-intl/server";
+import { auth, type UserType } from "@/app/(auth)/auth";
+import {
+  buildExecutionSystemPrompt,
+  ensureChatWorkspace,
+  executionToolsEnabled,
+  removeChatWorkspace,
+  writeAttachmentsToWorkspace,
+} from "@/lib/ai/agent-tools";
+import { isChatFileUrl } from "@/lib/ai/attachment-types";
+import {
+  type PreparedChatAttachments,
+  prepareChatAttachments,
+} from "@/lib/ai/attachments";
+import { DocumentInputError } from "@/lib/ai/document-errors";
+import { entitlementsByUserType } from "@/lib/ai/entitlements";
+import { classifyExecution } from "@/lib/ai/execution-classifier";
+import { loadEnabledManagedProjectSkills } from "@/lib/ai/managed-skills";
+import { getModelAvailability } from "@/lib/ai/models";
+import { getPiModel, toPiHistoryMessages } from "@/lib/ai/pi";
+import { type RequestHints, systemPrompt } from "@/lib/ai/prompts";
+import { checkUserTokenQuota, getUserModelCatalog } from "@/lib/ai/role-access";
+import { schedulingPrompt } from "@/lib/ai/scheduled-task-tools";
+import {
+  buildSkillsSystemPrompt,
+  createSkillTools,
+  invokeSkill,
+  parseSkillCommand,
+} from "@/lib/ai/skills";
+import { webSearchPrompt } from "@/lib/ai/web-tools";
+import {
+  publishChatMessage,
+  publishChatRun,
+} from "@/lib/collab/chat-event-hub";
+import { getChatAccess } from "@/lib/db/chat-share-queries";
+import { canReadStoredFile } from "@/lib/db/library-queries";
+import { listMcpServers } from "@/lib/db/mcp-server-queries";
+import { listPiPackages } from "@/lib/db/pi-package-queries";
+import { getProject } from "@/lib/db/project-queries";
+import {
+  deleteChatById,
+  getChatById,
+  getMessageCountByUserId,
+  getMessagesByChatId,
+  saveChat,
+  saveMessages,
+  updateChatTitleById,
+} from "@/lib/db/queries";
+import type { DBMessage } from "@/lib/db/schema";
+import { ChatbotError } from "@/lib/errors";
+import { LocalizedError } from "@/lib/i18n/messages";
+import { syncManagedAgentMcpConfig } from "@/lib/mcp/agent-config";
+import { buildProjectSourcesContext } from "@/lib/projects/context";
+import { projectDocumentInputsEnabled } from "@/lib/projects/document-inputs";
+import { durableChatExecutionPrompt } from "@/lib/runtime/backends/durable/chat-attachments";
+import { hashDurablePrompt } from "@/lib/runtime/backends/durable/chat-input";
+import { readDurableChatConfig } from "@/lib/runtime/backends/durable/chat-policy";
+import {
+  chatNeedsCompatibility,
+  projectChatExecution,
+  selectChatRuntime,
+} from "@/lib/runtime/backends/routing/chat-routing";
+import type {
+  ProjectSourcesGrant,
+  RuntimeCommand,
+} from "@/lib/runtime/protocol";
+import { getRunManager } from "@/lib/runtime/run";
+import {
+  assertDurableChatAdmission,
+  prepareDurableChatTurn,
+} from "@/lib/runtime/run/durable-chat";
+import type { RunSubscription } from "@/lib/runtime/run/run-manager";
+import { scheduledTaskTools } from "@/lib/scheduler/service";
+import { chatWebSearchTools } from "@/lib/search/chat";
+import { webSearchEnabled } from "@/lib/search/service";
+import type { ChatMessage, WaitingStatusData } from "@/lib/types";
+import {
+  convertToUIMessages,
+  generateUUID,
+  getTextFromMessage,
+} from "@/lib/utils";
+import { generateTitleFromUserMessage } from "../../actions";
+import {
+  isMessageTextTooLongError,
+  type PostRequestBody,
+  postRequestBodySchema,
+} from "./schema";
+import { pumpRunSubscription } from "./stream-mapping";
+
+export const maxDuration = 60;
+
+const HEALTH_CHECK_DELAY_MS = 9000;
+
+export async function POST(request: Request) {
+  const t = await getTranslations("api");
+  const tRuntime = await getTranslations();
+  let requestBody: PostRequestBody;
+
+  try {
+    const json = await request.json();
+    requestBody = postRequestBodySchema.parse(json);
+  } catch (error) {
+    // 超长消息返回专属提示（含上限），其余仍用通用 bad_request 文案
+    if (isMessageTextTooLongError(error)) {
+      return new ChatbotError("bad_request:chat").toResponse();
+    }
+    return new ChatbotError("bad_request:api").toResponse();
+  }
+
+  try {
+    const { id, message, messages, selectedChatModel, selectedVisibilityType } =
+      requestBody;
+
+    const [botIdResult, session] = await Promise.all([
+      // BotID 仅在显式开启（部署于 Vercel）时检测；自托管默认关闭：
+      // 服务端无 Vercel 平台注入时本就无法完成真实检测（每次请求都会
+      // 打 "Possible misconfiguration" 警告），客户端挑战在非安全上下文
+      // （http://IP:port）也无法运行，见 instrumentation-client.ts。
+      process.env.NEXT_PUBLIC_BOTID_ENABLED === "1"
+        ? checkBotId({ developmentOptions: { bypass: "HUMAN" } }).catch(
+            () => null
+          )
+        : Promise.resolve(null),
+      auth(),
+    ]);
+
+    if (botIdResult?.isBot) {
+      return new ChatbotError("forbidden:api").toResponse();
+    }
+
+    if (!session?.user) {
+      return new ChatbotError("unauthorized:chat").toResponse();
+    }
+
+    // 模型管理平台未配置任何模型时直接拒绝，不再回退静态模型
+    const modelCatalog = await getUserModelCatalog(session.user.id);
+    await checkUserTokenQuota(session.user.id);
+    if (modelCatalog.models.length === 0) {
+      if (modelCatalog.platformModelCount > 0) {
+        return new ChatbotError(
+          "forbidden:model",
+          t("noAuthorizedModel")
+        ).toResponse();
+      }
+      return Response.json({ error: t("noModelConfigured") }, { status: 503 });
+    }
+    const activeModelIds = new Set(
+      modelCatalog.models.map((model) => model.id)
+    );
+    if (!activeModelIds.has(selectedChatModel)) {
+      return new ChatbotError(
+        "forbidden:model",
+        "Model not authorized"
+      ).toResponse();
+    }
+    const chatModel = selectedChatModel;
+
+    const userType: UserType = session.user.type;
+
+    const messageCount = await getMessageCountByUserId({
+      differenceInHours: 1,
+      id: session.user.id,
+    });
+
+    if (messageCount > entitlementsByUserType[userType].maxMessagesPerHour) {
+      return new ChatbotError("rate_limit:chat").toResponse();
+    }
+
+    const isToolApprovalFlow = Boolean(messages);
+
+    const chat = await getChatById({ id });
+    let messagesFromDb: DBMessage[] = [];
+    let titlePromise: Promise<string> | null = null;
+    // 协作成员（非所有者）可续发消息，但：不触发 durable 自动分流；标题生成
+    // 仍属所有者首条消息场景；重写历史类操作在别处保持所有者限定。
+    let isChatOwner = true;
+
+    if (chat) {
+      const access = await getChatAccess(id, session.user.id);
+      if (!access || !(access.isOwner || access.isCollaborator)) {
+        return new ChatbotError("forbidden:chat").toResponse();
+      }
+      if (
+        chat.projectId &&
+        !(await getProject(session.user.id, chat.projectId))
+      ) {
+        return new ChatbotError("forbidden:chat").toResponse();
+      }
+      isChatOwner = access.isOwner;
+      messagesFromDb = await getMessagesByChatId({ id });
+      // 项目聊天在发起页已预建（标题为占位）：首条用户消息发出后生成标题
+      if (
+        chat.projectId &&
+        messagesFromDb.length === 0 &&
+        message?.role === "user" &&
+        message.parts.some((part) => part.type === "text" && part.text.trim())
+      ) {
+        titlePromise = generateTitleFromUserMessage({ message });
+      }
+    } else if (message?.role === "user") {
+      await saveChat({
+        id,
+        title: "New chat",
+        userId: session.user.id,
+        visibility: selectedVisibilityType,
+      });
+      const hasText = message.parts.some(
+        (part) => part.type === "text" && part.text.trim()
+      );
+      titlePromise = hasText
+        ? generateTitleFromUserMessage({ message })
+        : Promise.resolve(
+            message.parts[0]?.type === "file"
+              ? (message.parts[0].filename ?? t("attachmentProcessing"))
+              : t("attachmentProcessing")
+          );
+    }
+
+    let uiMessages: ChatMessage[];
+
+    if (isToolApprovalFlow && messages) {
+      const dbMessages = convertToUIMessages(messagesFromDb);
+      const approvalStates = new Map(
+        messages.flatMap(
+          (m) =>
+            m.parts
+              ?.filter(
+                (p: Record<string, unknown>) =>
+                  p.state === "approval-responded" ||
+                  p.state === "output-denied"
+              )
+              .map((p: Record<string, unknown>) => [
+                String(p.toolCallId ?? ""),
+                p,
+              ]) ?? []
+        )
+      );
+      uiMessages = dbMessages.map((msg) => ({
+        ...msg,
+        parts: msg.parts.map((part) => {
+          if (
+            "toolCallId" in part &&
+            approvalStates.has(String(part.toolCallId))
+          ) {
+            return { ...part, ...approvalStates.get(String(part.toolCallId)) };
+          }
+          return part;
+        }),
+      })) as ChatMessage[];
+    } else {
+      uiMessages = [
+        ...convertToUIMessages(messagesFromDb),
+        message as ChatMessage,
+      ];
+    }
+
+    // 审批续跑（v2.0 §2.1-8）：既有 assistant 消息的 parts（含审批状态
+    // 覆盖）与 id 作为 run 的 base——RunManager 终态 upsert 前置合并，
+    // 只落 run 事件 parts 会丢前轮内容/审批态。
+    let baseAssistantMessageId: string | undefined;
+    let baseParts: readonly unknown[] | undefined;
+    if (isToolApprovalFlow) {
+      const lastAssistant = uiMessages.findLast(
+        (currentMessage) => currentMessage.role === "assistant"
+      );
+      if (lastAssistant) {
+        baseAssistantMessageId = lastAssistant.id;
+        baseParts = lastAssistant.parts;
+      }
+    }
+
+    const { longitude, latitude, city, country } = geolocation(request);
+
+    const requestHints: RequestHints = {
+      city,
+      country,
+      latitude,
+      longitude,
+    };
+
+    const modelConfig = modelCatalog.models.find((m) => m.id === chatModel);
+    const currentUserMessageIndex = uiMessages.findLastIndex(
+      (currentMessage) => currentMessage.role === "user"
+    );
+    const currentUserMessage = uiMessages[currentUserMessageIndex];
+    const currentUserText = currentUserMessage
+      ? getTextFromMessage(currentUserMessage).trim()
+      : "";
+    const currentUserFileCount =
+      currentUserMessage?.parts.filter((part) => part.type === "file").length ??
+      0;
+    if (!(currentUserText || currentUserFileCount > 0)) {
+      return new ChatbotError("bad_request:api").toResponse();
+    }
+    let projectClassification: ReturnType<typeof projectChatExecution>;
+    try {
+      projectClassification = projectChatExecution({
+        executionEnabled: executionToolsEnabled(),
+        projectChat: Boolean(chat?.projectId),
+        sandboxProvider: process.env.PIWORK_SANDBOX_PROVIDER,
+      });
+    } catch (error) {
+      return Response.json(
+        {
+          error:
+            error instanceof LocalizedError
+              ? tRuntime(error.messageKey, error.params)
+              : error instanceof Error
+                ? error.message
+                : t("projectSandboxUnavailable"),
+        },
+        { status: 503 }
+      );
+    }
+    const skillCommand = parseSkillCommand(currentUserText);
+    const history = uiMessages.slice(0, currentUserMessageIndex);
+    // Decide before parsing attachments or creating a host workspace. Metadata
+    // discovery is not execution; only names, never integration credentials, are used.
+    const discovered = await loadEnabledManagedProjectSkills();
+    const durableConfig = readDurableChatConfig();
+    const [mcpServers, packages] = durableConfig
+      ? await Promise.all([listMcpServers(), listPiPackages()])
+      : [[], []];
+    const platformWebSearch = webSearchEnabled();
+    const classification =
+      projectClassification ??
+      (executionToolsEnabled()
+        ? skillCommand
+          ? { reason: "skill-command", requiresExecution: true }
+          : await classifyExecution({
+              attachmentCount: currentUserFileCount,
+              history: history.map((item) => ({
+                role: item.role,
+                text: getTextFromMessage(item),
+              })),
+              message: currentUserText,
+              platformWebSearch,
+              signal: request.signal,
+            })
+        : { reason: "disabled", requiresExecution: false });
+    const routing = selectChatRuntime({
+      approvalContinuation: isToolApprovalFlow,
+      classificationReason: classification.reason,
+      // 协作成员的消息固定走既有经典矩阵：durable lane 的正式 DB 授权按
+      // Chat.userId 复核，非所有者会在水合/执行前被拒绝；这里提前排除，
+      // 避免「选定后失败」。分类不等于授权。
+      durableEnabled: durableConfig !== null && isChatOwner,
+      needsCompatibility: chatNeedsCompatibility({
+        capabilityNames: [
+          ...discovered.skills.map((skill) => skill.name),
+          ...mcpServers
+            .filter((server) => server.enabled)
+            .map((server) => server.name),
+          ...packages
+            .filter((item) => item.resourceSummary.extensions > 0)
+            .map((item) => item.name),
+        ],
+        history,
+        message: currentUserText,
+      }),
+      projectChat: Boolean(chat?.projectId),
+      requiresExecution: classification.requiresExecution,
+      skillCommand: Boolean(skillCommand),
+    });
+    const isDurable = routing.lane === "durable_sandbox";
+    if (isDurable) {
+      // Authorization failure after selection is fatal, not a reroute to host tools.
+      await assertDurableChatAdmission(session.user.id);
+    }
+    console.info("[chat] execution routing", {
+      chatId: id,
+      ...classification,
+      ...routing,
+    });
+
+    let durableTurn:
+      | Awaited<ReturnType<typeof prepareDurableChatTurn>>
+      | undefined;
+    if (message?.role === "user") {
+      if (isDurable) {
+        try {
+          durableTurn = await prepareDurableChatTurn(
+            session.user.id,
+            message,
+            request.signal
+          );
+        } catch (error) {
+          if (error instanceof ChatbotError) {
+            throw error;
+          }
+          return new Response(t("durableAttachmentUnavailable"), {
+            status: 400,
+          });
+        }
+      }
+      const fileAccess = await Promise.all(
+        message.parts
+          .filter((part) => part.type === "file" && isChatFileUrl(part.url))
+          .map((part) =>
+            part.type === "file"
+              ? canReadStoredFile(session.user.id, part.url)
+              : true
+          )
+      );
+      if (fileAccess.some((allowed) => !allowed)) {
+        return new ChatbotError("forbidden:chat").toResponse();
+      }
+      await saveMessages({
+        messages: [
+          {
+            attachments: [],
+            chatId: id,
+            createdAt: new Date(),
+            id: message.id,
+            parts: message.parts,
+            role: "user",
+            // 消息归属由服务端会话决定，不信任客户端 metadata；
+            // 用于协作对话的用户消息头像/名字展示。
+            userId: session.user.id,
+          },
+        ],
+      });
+      // 协作实时：用户消息落库后通知房间其他成员（本人跳过；
+      // 事件不携带正文，watcher 重拉 /api/messages）。
+      publishChatMessage({
+        actorId: session.user.id,
+        chatId: id,
+        role: "user",
+      });
+    }
+
+    let preparedAttachments: PreparedChatAttachments;
+    try {
+      preparedAttachments = isDurable
+        ? { images: durableTurn?.images ?? [], text: "" }
+        : currentUserMessage
+          ? await prepareChatAttachments(currentUserMessage, request.signal)
+          : { images: [], text: "" };
+    } catch (error) {
+      return Response.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unable to process attachments.",
+        },
+        { status: 400 }
+      );
+    }
+    const piModel = await getPiModel(chatModel);
+    if (
+      preparedAttachments.images.length > 0 &&
+      !piModel.input.includes("image")
+    ) {
+      return Response.json({ error: t("modelNoImages") }, { status: 400 });
+    }
+
+    // No platform closures silently cross the Durable seam.
+    const { skills, diagnostics: skillDiagnostics } = isDurable
+      ? { diagnostics: [], skills: [] }
+      : discovered;
+    if (skillDiagnostics.length > 0) {
+      console.warn("Skill discovery warnings:", skillDiagnostics);
+    }
+
+    // 执行类工具（bash/read/write/edit + deliver_file）以每聊天独立工作区
+    // 运行；用户上传的附件原始字节先落盘到工作区供 skill 脚本直接读取。
+    const workspaceDir = isDurable
+      ? "ephemeral"
+      : classification.requiresExecution
+        ? await ensureChatWorkspace(id)
+        : null;
+    // 管理端 MCP 服务配置同步进受管 agentDir 的 mcp.json（Pi 内置 MCP
+    // 扩展的全局发现位置，pi.dev/docs/latest/mcp）；幂等（内容未变不写盘），
+    // 失败仅记日志不阻断聊天。无工作区会话本来就禁用受管扩展/MCP，
+    // 不必写共享配置；自动选定的 Durable 路径也不装配 MCP。
+    if (!isDurable && workspaceDir) {
+      await syncManagedAgentMcpConfig().catch((error) => {
+        console.warn("Failed to sync managed agent mcp.json:", error);
+      });
+    }
+    let workspaceAttachmentFiles: string[] = [];
+    if (!isDurable && workspaceDir && currentUserMessage) {
+      try {
+        workspaceAttachmentFiles = await writeAttachmentsToWorkspace(
+          currentUserMessage,
+          workspaceDir,
+          request.signal
+        );
+      } catch (error) {
+        // 输入准备失败传播（A2）：执行类任务的必要附件水合失败不得静默
+        // 降级——缺输入的执行会产出错误结果；fail-closed 直接拒绝本次请求。
+        console.error("Failed to materialize attachments into workspace:", {
+          chatId: id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // biome-ignore lint/style/useErrorCause: 原始错误已在上行日志保留；用户可见文案走 i18n
+        throw new ChatbotError(
+          "bad_request:chat",
+          t("attachmentWorkspaceFailed")
+        );
+      }
+    }
+
+    const baseSystemPrompt = systemPrompt({
+      requestHints,
+      supportsTools: false,
+    });
+    const executionPrompt = isDurable
+      ? durableChatExecutionPrompt(durableTurn?.attachments ?? [])
+      : workspaceDir
+        ? buildExecutionSystemPrompt(workspaceDir, workspaceAttachmentFiles)
+        : "";
+    const historyMessages = toPiHistoryMessages(
+      uiMessages.slice(0, currentUserMessageIndex),
+      chatModel
+    );
+
+    const sandboxSkillCommand = Boolean(
+      process.env.PIWORK_SANDBOX_PROVIDER && workspaceDir && skillCommand
+    );
+    let agentPrompt = currentUserText || t("attachmentPrompt");
+    if (skillCommand) {
+      try {
+        if (!skills.some((skill) => skill.name === skillCommand.name)) {
+          throw new Error(`Unknown skill "${skillCommand.name}".`);
+        }
+        agentPrompt = sandboxSkillCommand
+          ? (skillCommand.instructions ?? "")
+          : await invokeSkill(
+              skills,
+              skillCommand.name,
+              skillCommand.instructions
+            );
+      } catch (error) {
+        return Response.json(
+          { error: error instanceof Error ? error.message : t("unknownSkill") },
+          { status: 404 }
+        );
+      }
+    }
+    if (preparedAttachments.text) {
+      agentPrompt = `${agentPrompt}\n\n${preparedAttachments.text}`;
+    }
+
+    let projectSources: ProjectSourcesGrant | undefined;
+    // Preview in prompt; complete stored text is hydrated inside SandboxRpc.
+    if (chat?.projectId) {
+      try {
+        const projectRecord = await getProject(session.user.id, chat.projectId);
+        if (!projectRecord) {
+          return new ChatbotError("forbidden:chat").toResponse();
+        }
+        if (projectRecord) {
+          const context = await buildProjectSourcesContext({
+            projectId: projectRecord.id,
+            projectName: projectRecord.name,
+            sandboxDocuments: projectDocumentInputsEnabled(),
+            userId: session.user.id,
+          });
+          if (context) {
+            if (context.images.length && !piModel.input.includes("image")) {
+              return Response.json(
+                { error: t("modelNoImages") },
+                { status: 400 }
+              );
+            }
+            preparedAttachments.images.push(...context.images);
+            if (projectDocumentInputsEnabled()) {
+              projectSources = {
+                projectId: projectRecord.id,
+                sources: context.references,
+                userId: session.user.id,
+              };
+            }
+            agentPrompt = `${context.block}${t("questionPrompt", { text: agentPrompt })}`;
+          }
+        }
+      } catch (error) {
+        console.warn("Project sources context failed:", error);
+        return Response.json(
+          {
+            error:
+              error instanceof DocumentInputError
+                ? tRuntime(error.messageKey, error.params)
+                : t("sourceExtractFailed"),
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    const runtimePrompt: Extract<RuntimeCommand, { type: "prompt" }> = {
+      expandPromptTemplates: false,
+      images: preparedAttachments.images,
+      // Official remote Pi expands the command after project/attachment context
+      // is assembled, using its actual sandbox-local SKILL.md/baseDir.
+      text:
+        sandboxSkillCommand && skillCommand
+          ? `/skill:${skillCommand.name} ${agentPrompt}`
+          : agentPrompt,
+      type: "prompt",
+    };
+    const stream = createUIMessageStream({
+      execute: async ({ writer: dataStream }) => {
+        const modelName = modelConfig?.name ?? chatModel;
+        let hasModelActivity = false;
+        let healthCheckTimer: ReturnType<typeof setTimeout> | undefined;
+
+        const clearHealthCheckTimer = () => {
+          if (healthCheckTimer) {
+            clearTimeout(healthCheckTimer);
+          }
+        };
+
+        const writeWaitingStatus = (
+          phase: WaitingStatusData["phase"],
+          messageText: string
+        ) => {
+          if (hasModelActivity && phase !== "thinking") {
+            return;
+          }
+          dataStream.write({
+            data: {
+              message: messageText,
+              modelId: chatModel,
+              modelName,
+              phase,
+            },
+            transient: true,
+            type: "data-waiting-status",
+          });
+        };
+
+        writeWaitingStatus("waiting", "Waiting...");
+
+        healthCheckTimer = setTimeout(() => {
+          Promise.resolve(getModelAvailability(chatModel))
+            .then((availability) => {
+              if (availability === "impacted") {
+                writeWaitingStatus(
+                  "health",
+                  `${modelName} may be slow or unavailable right now...`
+                );
+              } else {
+                writeWaitingStatus("still-waiting", "Still waiting...");
+              }
+            })
+            .catch(() => {
+              writeWaitingStatus("still-waiting", "Still waiting...");
+            });
+        }, HEALTH_CHECK_DELAY_MS);
+
+        const markModelActive = () => {
+          if (hasModelActivity) {
+            return;
+          }
+          hasModelActivity = true;
+          clearHealthCheckTimer();
+          writeWaitingStatus("thinking", "Thinking...");
+        };
+
+        const stopWaitingStatus = () => {
+          hasModelActivity = true;
+          clearHealthCheckTimer();
+        };
+
+        // RunManager（v2.0 Step 2）：run 生命周期独立于本请求——start 落
+        // AgentRun/lease 并启动唯一消费循环，route 只 attach 订阅；断线仅
+        // detach（run 进程内继续），消息在终态由 RunManager 幂等 upsert。
+        let subscription: RunSubscription | undefined;
+        try {
+          const run = await getRunManager().start({
+            baseAssistantMessageId,
+            baseParts,
+            prompt: runtimePrompt,
+            spec: {
+              ...(projectSources ? { projectSources } : {}),
+              lane: routing.lane,
+              ...(isDurable
+                ? {
+                    durableChat: {
+                      attachments: durableTurn?.attachments ?? [],
+                      catalogModelId: chatModel,
+                      promptHash: hashDurablePrompt(runtimePrompt),
+                      userId: session.user.id,
+                    },
+                  }
+                : {}),
+              appendSystemPrompt: isDurable
+                ? [executionPrompt]
+                : [
+                    buildSkillsSystemPrompt(skills),
+                    schedulingPrompt + new Date().toISOString(),
+                    ...(platformWebSearch && !workspaceDir
+                      ? [webSearchPrompt + new Date().toISOString()]
+                      : []),
+                    ...(executionPrompt ? [executionPrompt] : []),
+                  ],
+              chatId: id,
+              historyMessages,
+              model: piModel,
+              skills: isDurable ? [] : skills,
+              systemPrompt: baseSystemPrompt,
+              tools: isDurable
+                ? []
+                : [
+                    ...createSkillTools(skills),
+                    ...(platformWebSearch && !workspaceDir
+                      ? chatWebSearchTools({
+                          chatId: id,
+                          model: piModel,
+                          userId: session.user.id,
+                        })
+                      : []),
+                    ...scheduledTaskTools(
+                      session.user.id,
+                      currentUserMessage.id
+                    ),
+                  ],
+              workspaceDir,
+            },
+            userId: session.user.id,
+          });
+
+          const attached = run.attach();
+          if (!attached) {
+            // start 返回后 LiveRun 必在，仅防御性兜底
+            throw new Error("run detached before attach");
+          }
+          subscription = attached;
+          // 协作实时：run 已启动且本请求成功 attach，通知房间其他成员
+          // resumeStream attach 活跃 run（与断线重连同一重放/活流 tail）。
+          publishChatRun({
+            actorId: session.user.id,
+            chatId: id,
+            phase: "started",
+          });
+          // 显式 start：客户端/DB/重放共用同一确定性消息 id（§2.5）
+          dataStream.write({ messageId: attached.messageId, type: "start" });
+
+          const detach = () => subscription?.close();
+          request.signal.addEventListener("abort", detach, { once: true });
+          try {
+            await pumpRunSubscription(dataStream, subscription, {
+              // 任意内容块事件即视为模型活跃(含 tool 通道,与原事件桥一致)
+              onEvent: (event) => {
+                if (event.type === "message.delta") {
+                  markModelActive();
+                }
+              },
+            });
+          } finally {
+            request.signal.removeEventListener("abort", detach);
+          }
+        } finally {
+          stopWaitingStatus();
+          subscription?.close();
+        }
+
+        if (titlePromise) {
+          try {
+            const title = await titlePromise;
+            await updateChatTitleById({ chatId: id, title });
+            dataStream.write({ data: title, type: "data-chat-title" });
+          } catch {
+            /* non-fatal */
+          }
+        }
+      },
+      generateId: generateUUID,
+      onError: (error) => {
+        console.error("[chat] stream execution failed", { chatId: id }, error);
+        return t("modelUnavailable");
+      },
+    });
+
+    return createUIMessageStreamResponse({ stream });
+  } catch (error) {
+    const vercelId = request.headers.get("x-vercel-id");
+
+    if (error instanceof ChatbotError) {
+      return error.toResponse();
+    }
+
+    console.error("Unhandled error in chat API:", error, { vercelId });
+    return new ChatbotError("offline:chat").toResponse();
+  }
+}
+
+export async function DELETE(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get("id");
+
+  if (!id) {
+    return new ChatbotError("bad_request:api").toResponse();
+  }
+
+  const session = await auth();
+
+  if (!session?.user) {
+    return new ChatbotError("unauthorized:chat").toResponse();
+  }
+
+  const chat = await getChatById({ id });
+
+  if (chat?.userId !== session.user.id) {
+    return new ChatbotError("forbidden:chat").toResponse();
+  }
+
+  // 先停活跃 run 再删（best-effort）：避免删除后 run 继续向已删 chat 落消息
+  await getRunManager()
+    .abortByChat(id)
+    .catch(() => undefined);
+
+  const deletedChat = await deleteChatById({ id });
+
+  // 聊天删除后同步清理其执行工作区（best-effort）。
+  await removeChatWorkspace(id).catch(() => undefined);
+
+  return Response.json(deletedChat, { status: 200 });
+}

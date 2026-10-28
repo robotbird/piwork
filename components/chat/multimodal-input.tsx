@@ -1,0 +1,1494 @@
+"use client";
+
+import type { UseChatHelpers } from "@ai-sdk/react";
+import type { UIMessage } from "ai";
+import equal from "fast-deep-equal";
+import {
+  CheckIcon,
+  FolderIcon,
+  HammerIcon,
+  LibraryBigIcon,
+  MicIcon,
+  PaperclipIcon,
+  PlusIcon,
+} from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
+import { useTheme } from "next-themes";
+import {
+  type ChangeEvent,
+  type Dispatch,
+  memo,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { toast } from "sonner";
+import useSWR from "swr";
+import { useLocalStorage, useWindowSize } from "usehooks-ts";
+import {
+  ModelSelector,
+  ModelSelectorContent,
+  ModelSelectorItem,
+  ModelSelectorList,
+  ModelSelectorLogo,
+  ModelSelectorName,
+  ModelSelectorTrigger,
+} from "@/components/ai-elements/model-selector";
+import { usePreferences } from "@/components/preferences-provider";
+import { useUploadSettings } from "@/hooks/use-upload-settings";
+import {
+  CHAT_ATTACHMENT_ACCEPT,
+  MAX_CHAT_ATTACHMENT_COUNT,
+} from "@/lib/ai/attachment-types";
+import type { ChatModel } from "@/lib/ai/models";
+import {
+  buildPastedTextFilename,
+  CHAT_TEXT_PART_MAX_LENGTH,
+  CHAT_TEXT_TO_FILE_THRESHOLD,
+  normalizePastedText,
+} from "@/lib/chat-input";
+import type { Attachment, ChatMessage } from "@/lib/types";
+import { uploadLimitBytes } from "@/lib/uploads/settings";
+import { cn, fetcher, generateUUID } from "@/lib/utils";
+import {
+  PromptInput,
+  PromptInputFooter,
+  PromptInputSubmit,
+  PromptInputTextarea,
+  PromptInputTools,
+} from "../ai-elements/prompt-input";
+import { Button } from "../ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { ArrowUpIcon, ChevronDownIcon, StopIcon } from "./icons";
+import { LibraryFilePicker } from "./library-file-picker";
+import { PreviewAttachment } from "./preview-attachment";
+import {
+  createSkillSlashCommands,
+  type SkillSummary,
+  type SlashCommand,
+  SlashCommandMenu,
+  slashCommands,
+} from "./slash-commands";
+import { TextAttachmentPreview } from "./text-attachment-preview";
+import type { VisibilityType } from "./visibility-selector";
+
+function setCookie(name: string, value: string) {
+  const maxAge = 60 * 60 * 24 * 365;
+  // biome-ignore lint/suspicious/noDocumentCookie: needed for client-side cookie setting
+  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAge}`;
+}
+
+function PureMultimodalInput({
+  chatId,
+  input,
+  setInput,
+  status,
+  stop,
+  attachments,
+  setAttachments,
+  messages,
+  setMessages,
+  sendMessage,
+  className,
+  selectedModelId,
+  onModelChange,
+  editingMessage,
+  onCancelEdit,
+  disableSkillCommands = false,
+}: {
+  chatId: string;
+  input: string;
+  setInput: Dispatch<SetStateAction<string>>;
+  status: UseChatHelpers<ChatMessage>["status"];
+  stop: () => void;
+  attachments: Attachment[];
+  setAttachments: Dispatch<SetStateAction<Attachment[]>>;
+  messages: UIMessage[];
+  setMessages: UseChatHelpers<ChatMessage>["setMessages"];
+  sendMessage:
+    | UseChatHelpers<ChatMessage>["sendMessage"]
+    | (() => Promise<void>);
+  className?: string;
+  selectedVisibilityType: VisibilityType;
+  selectedModelId: string;
+  onModelChange?: (modelId: string) => void;
+  editingMessage?: ChatMessage | null;
+  onCancelEdit?: () => void;
+  isLoading?: boolean;
+  disableSkillCommands?: boolean;
+}) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const { setTheme, resolvedTheme } = useTheme();
+  const { t } = usePreferences();
+  const chatT = useTranslations("chat");
+  const commonT = useTranslations("common");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // 长文转 txt 附件上传期间防止重复提交
+  const submittingRef = useRef(false);
+  const { width } = useWindowSize();
+  const hasAutoFocused = useRef(false);
+  useEffect(() => {
+    if (!hasAutoFocused.current && width) {
+      const timer = setTimeout(() => {
+        textareaRef.current?.focus();
+        hasAutoFocused.current = true;
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [width]);
+
+  const [localStorageInput, setLocalStorageInput] = useLocalStorage(
+    "input",
+    ""
+  );
+
+  const [draftRestored, setDraftRestored] = useState(false);
+  useEffect(() => {
+    if (draftRestored || !textareaRef.current) {
+      return;
+    }
+    // 缓存仅在初始化时恢复；空字符串也是有效输入，删除后不能回填旧草稿。
+    setInput(textareaRef.current.value || localStorageInput || "");
+    setDraftRestored(true);
+  }, [draftRestored, localStorageInput, setInput]);
+
+  useEffect(() => {
+    // 等恢复完成再保存，避免首次 render 的空 input 抹掉缓存。
+    if (draftRestored) {
+      setLocalStorageInput(input);
+    }
+  }, [draftRestored, input, setLocalStorageInput]);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadQueue, setUploadQueue] = useState<string[]>([]);
+  const [librarySelecting, setLibrarySelecting] = useState(false);
+  const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [slashQuery, setSlashQuery] = useState("");
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [selectedSkill, setSelectedSkill] = useState<{
+    displayName: string;
+    name: string;
+  } | null>(null);
+  const skillsEndpoint = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/skills`;
+  const { data: skillsData, mutate: refreshSkills } = useSWR<{
+    skills: SkillSummary[];
+  }>(disableSkillCommands ? null : skillsEndpoint, fetcher, {
+    revalidateOnFocus: true,
+  });
+
+  // 项目选择（对齐 ChatGPT）：空会话时从「项目」按钮挑选，选中后
+  // placeholder 提示将在此项目中新建对话；提交时复用项目主页的
+  // 预建聊天 + ?query= 链路，不引入第二条发送路径。
+  const [selectedProject, setSelectedProject] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [creatingProjectChat, setCreatingProjectChat] = useState(false);
+  const projectsEndpoint = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/projects`;
+  const { data: projectsData, isLoading: projectsLoading } = useSWR<{
+    projects: { id: string; name: string; updatedAt: string }[];
+  }>(messages.length === 0 ? projectsEndpoint : null, fetcher, {
+    revalidateOnFocus: false,
+  });
+  const projects = projectsData?.projects ?? [];
+
+  // 跳转到项目聊天页后清空选择，避免残留状态影响新路径下的会话；
+  // pathname 是故意的触发依赖（不在 effect 体内读取）
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset on every route change
+  useEffect(() => {
+    setSelectedProject(null);
+    setProjectPickerOpen(false);
+  }, [pathname]);
+  // 技能在前、内置指令在后（与参考设计的分组顺序一致，键盘索引自洽）
+  const availableSlashCommands = useMemo(
+    () => [
+      ...createSkillSlashCommands(
+        disableSkillCommands ? [] : (skillsData?.skills ?? [])
+      ),
+      ...slashCommands,
+    ],
+    [skillsData?.skills, disableSkillCommands]
+  );
+  useEffect(() => {
+    if (disableSkillCommands) {
+      setSelectedSkill(null);
+      setSlashOpen(false);
+    }
+  }, [disableSkillCommands]);
+  const previousStatusRef = useRef(status);
+
+  useEffect(() => {
+    const previousStatus = previousStatusRef.current;
+    previousStatusRef.current = status;
+    if (previousStatus !== "ready" && status === "ready") {
+      refreshSkills();
+    }
+  }, [refreshSkills, status]);
+
+  const handleInput = useCallback(
+    (event: ChangeEvent<HTMLTextAreaElement>) => {
+      const val = event.target.value;
+      setInput(val);
+
+      if (val.startsWith("/") && !val.includes(" ")) {
+        setSlashOpen(true);
+        setSlashQuery(val.slice(1));
+        setSlashIndex(0);
+      } else {
+        setSlashOpen(false);
+      }
+    },
+    [setInput]
+  );
+
+  // Stop（v2.0 Step 2）：本地 stop() 只断订阅，需另发 fire-and-forget 中止
+  // 端点真正停 run；失败不打断本地停止
+  const stopGeneration = useCallback(() => {
+    fetch(
+      `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/chat/${chatId}/stop`,
+      { method: "POST" }
+    ).catch(() => undefined);
+    stop();
+  }, [chatId, stop]);
+
+  const handleSlashSelect = useCallback(
+    (cmd: SlashCommand) => {
+      setSlashOpen(false);
+      if (cmd.action === "skill" && cmd.skillName) {
+        if (disableSkillCommands) {
+          return;
+        }
+        setSelectedSkill({
+          displayName: cmd.displayName ?? cmd.skillName,
+          name: cmd.skillName,
+        });
+        setInput("");
+        requestAnimationFrame(() => textareaRef.current?.focus());
+        return;
+      }
+
+      setSelectedSkill(null);
+      setInput("");
+      switch (cmd.action) {
+        case "new":
+          router.push("/");
+          break;
+        case "clear":
+          setMessages(() => []);
+          break;
+        case "rename":
+          toast(chatT("renameFromSidebar"));
+          break;
+        case "model": {
+          const modelBtn = document.querySelector<HTMLButtonElement>(
+            "[data-testid='model-selector']"
+          );
+          modelBtn?.click();
+          break;
+        }
+        case "theme":
+          setTheme(resolvedTheme === "dark" ? "light" : "dark");
+          break;
+        case "delete":
+          toast(chatT("deleteChatConfirm"), {
+            action: {
+              label: chatT("delete"),
+              onClick: () => {
+                fetch(
+                  `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/chat?id=${chatId}`,
+                  { method: "DELETE" }
+                );
+                router.push("/");
+                toast.success(chatT("chatDeleted"));
+              },
+            },
+          });
+          break;
+        case "purge":
+          toast(chatT("deleteAllChatsConfirm"), {
+            action: {
+              label: chatT("deleteAll"),
+              onClick: () => {
+                fetch(
+                  `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/history`,
+                  {
+                    method: "DELETE",
+                  }
+                );
+                router.push("/");
+                toast.success(chatT("allChatsDeleted"));
+              },
+            },
+          });
+          break;
+        default:
+          break;
+      }
+    },
+    [
+      chatId,
+      chatT,
+      resolvedTheme,
+      router,
+      setInput,
+      setMessages,
+      setTheme,
+      disableSkillCommands,
+    ]
+  );
+
+  /** 选中项目后提交：预建项目聊天后带 ?query= 跳转，由聊天页自动发出首条消息
+   * （与项目主页 startChat 相同的既有链路，不新开辟发送路径） */
+  const startProjectChat = useCallback(
+    async (project: { id: string; name: string }, messageText: string) => {
+      setCreatingProjectChat(true);
+      try {
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/projects/${project.id}/chats`,
+          {
+            body: JSON.stringify({ id: generateUUID() }),
+            headers: { "Content-Type": "application/json" },
+            method: "POST",
+          }
+        );
+        if (!response.ok) {
+          const body = (await response.json().catch(() => null)) as {
+            error?: unknown;
+          } | null;
+          throw new Error(
+            body && typeof body.error === "string"
+              ? body.error
+              : chatT("createProjectChatFailed")
+          );
+        }
+        const { chat } = (await response.json()) as { chat: { id: string } };
+        setAttachments([]);
+        setLocalStorageInput("");
+        setInput("");
+        setSelectedSkill(null);
+        setSlashOpen(false);
+        router.push(
+          `/projects/${project.id}/chat/${chat.id}?query=${encodeURIComponent(messageText)}`
+        );
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : chatT("createProjectChatFailed")
+        );
+      } finally {
+        setCreatingProjectChat(false);
+      }
+    },
+    [chatT, router, setAttachments, setInput, setLocalStorageInput]
+  );
+
+  const { data: uploadSettings } = useUploadSettings();
+  const uploadT = useTranslations("api");
+
+  const uploadFile = useCallback(
+    async (file: File) => {
+      if (uploadSettings && file.size > uploadLimitBytes(uploadSettings)) {
+        toast.error(
+          uploadT("fileTooLarge", { maxMB: uploadSettings.maxFileSizeMB })
+        );
+        return;
+      }
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/files/upload`,
+          {
+            body: formData,
+            method: "POST",
+          }
+        );
+
+        if (response.ok) {
+          const data = await response.json();
+          const { url, pathname: filePath, contentType, name } = data;
+
+          return {
+            contentType,
+            name: name ?? filePath,
+            url,
+          };
+        }
+        const { error } = await response.json();
+        toast.error(error);
+      } catch {
+        toast.error(commonT("uploadFailed"));
+      }
+    },
+    [commonT, uploadSettings, uploadT]
+  );
+
+  const submitForm = useCallback(async () => {
+    const task = input.trim();
+    const messageText = selectedSkill
+      ? `/${selectedSkill.name}${task ? ` ${task}` : ""}`
+      : input;
+
+    // 客户端先拦截超长消息，直接提示上限，不等服务端 400
+    if (messageText.length > CHAT_TEXT_PART_MAX_LENGTH) {
+      toast.error(
+        t("chat.messageTooLong", {
+          limit: CHAT_TEXT_PART_MAX_LENGTH.toLocaleString("en-US"),
+        })
+      );
+      return;
+    }
+
+    // 选定了项目（仅空会话可选）：走项目聊天链路；附件无法经 ?query= 传递，
+    // fail-closed 提示先移除，避免静默丢失
+    if (selectedProject && messages.length === 0) {
+      if (attachments.length > 0) {
+        toast.error(t("chat.projectChatAttachmentsUnsupported"));
+        return;
+      }
+      if (!messageText.trim() || creatingProjectChat) {
+        return;
+      }
+      startProjectChat(selectedProject, messageText);
+      return;
+    }
+
+    window.history.pushState(
+      {},
+      "",
+      `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/chat/${chatId}`
+    );
+
+    // 长文转 txt 上传期间防止重复提交
+    if (submittingRef.current) {
+      return;
+    }
+    submittingRef.current = true;
+
+    try {
+      // 超过阈值且非技能命令：整段文本转为 txt 附件发送（换行已归一化），
+      // 上传失败时回退为纯文本发送（仍在上限内，服务端可收）
+      let longTextAttachment: Attachment | undefined;
+      if (
+        !selectedSkill &&
+        messageText.trim().length > CHAT_TEXT_TO_FILE_THRESHOLD
+      ) {
+        const file = new File(
+          [normalizePastedText(messageText)],
+          buildPastedTextFilename(),
+          { type: "text/plain" }
+        );
+        setUploadQueue([file.name]);
+        longTextAttachment = (await uploadFile(file)) ?? undefined;
+        setUploadQueue([]);
+        if (longTextAttachment) {
+          toast.success(chatT("longTextAttachedAsTxt"));
+        }
+      }
+
+      sendMessage({
+        parts: [
+          ...attachments.map((attachment) => ({
+            filename: attachment.name,
+            mediaType: attachment.contentType,
+            type: "file" as const,
+            url: attachment.url,
+          })),
+          ...(longTextAttachment
+            ? [
+                {
+                  filename: longTextAttachment.name,
+                  mediaType: longTextAttachment.contentType,
+                  type: "file" as const,
+                  url: longTextAttachment.url,
+                },
+              ]
+            : []),
+          ...(longTextAttachment || !messageText.trim()
+            ? []
+            : [{ text: messageText, type: "text" as const }]),
+        ],
+        role: "user",
+      });
+
+      setAttachments([]);
+      setLocalStorageInput("");
+      setInput("");
+      setSelectedSkill(null);
+      setSlashOpen(false);
+    } finally {
+      submittingRef.current = false;
+    }
+
+    if (width && width > 768) {
+      textareaRef.current?.focus();
+    }
+  }, [
+    attachments,
+    creatingProjectChat,
+    input,
+    messages.length,
+    selectedProject,
+    selectedSkill,
+    sendMessage,
+    setInput,
+    startProjectChat,
+    t,
+    chatT,
+    setAttachments,
+    setLocalStorageInput,
+    width,
+    chatId,
+    uploadFile,
+  ]);
+
+  const handleFileChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      // 项目新对话暂不携带附件（?query= 链路只传文本），fail-closed 提示
+      if (selectedProject) {
+        toast.error(t("chat.projectChatAttachmentsUnsupported"));
+        event.target.value = "";
+        return;
+      }
+      const availableSlots = Math.max(
+        0,
+        MAX_CHAT_ATTACHMENT_COUNT - attachments.length
+      );
+      const selectedFiles = Array.from(event.target.files || []);
+      const files = selectedFiles.slice(0, availableSlots);
+
+      if (selectedFiles.length > availableSlots) {
+        toast.error(
+          commonT("attachmentLimit", { count: MAX_CHAT_ATTACHMENT_COUNT })
+        );
+      }
+      if (files.length === 0) {
+        event.target.value = "";
+        return;
+      }
+
+      setUploadQueue(files.map((file) => file.name));
+
+      try {
+        const uploadPromises = files.map((file) => uploadFile(file));
+        const uploadedAttachments = await Promise.all(uploadPromises);
+        const successfullyUploadedAttachments = uploadedAttachments.filter(
+          (attachment) => attachment !== undefined
+        );
+
+        setAttachments((currentAttachments) => [
+          ...currentAttachments,
+          ...successfullyUploadedAttachments,
+        ]);
+      } catch {
+        toast.error(commonT("uploadFailed"));
+      } finally {
+        setUploadQueue([]);
+        event.target.value = "";
+      }
+    },
+    [
+      attachments.length,
+      commonT,
+      selectedProject,
+      setAttachments,
+      t,
+      uploadFile,
+    ]
+  );
+
+  // 长文本转 txt 附件：归一化换行后走既有上传链路，
+  // 上传成功后作为附件芯片展示在输入框上方
+  const attachLongText = useCallback(
+    async (text: string) => {
+      if (attachments.length >= MAX_CHAT_ATTACHMENT_COUNT) {
+        toast.error(
+          commonT("attachmentLimit", { count: MAX_CHAT_ATTACHMENT_COUNT })
+        );
+        return;
+      }
+      const file = new File(
+        [normalizePastedText(text)],
+        buildPastedTextFilename(),
+        {
+          type: "text/plain",
+        }
+      );
+      setUploadQueue((prev) => [...prev, file.name]);
+      try {
+        const uploaded = await uploadFile(file);
+        if (uploaded) {
+          setAttachments((current) => [...current, uploaded]);
+          toast.success(chatT("longTextAttachedAsTxt"));
+        }
+      } finally {
+        setUploadQueue((prev) => prev.filter((name) => name !== file.name));
+      }
+    },
+    [attachments.length, chatT, commonT, setAttachments, uploadFile]
+  );
+
+  const handlePaste = useCallback(
+    async (event: ClipboardEvent) => {
+      // 项目新对话暂不携带附件（?query= 链路只传文本），fail-closed 提示
+      if (selectedProject) {
+        toast.error(t("chat.projectChatAttachmentsUnsupported"));
+        return;
+      }
+      const items = event.clipboardData?.items;
+      if (!items) {
+        return;
+      }
+
+      const imageItems = Array.from(items).filter((item) =>
+        item.type.startsWith("image/")
+      );
+
+      // 纯文本粘贴超过阈值：转为 txt 附件，不塞进输入框
+      if (imageItems.length === 0) {
+        const pastedText = event.clipboardData?.getData("text/plain") ?? "";
+        if (pastedText.length > CHAT_TEXT_TO_FILE_THRESHOLD) {
+          event.preventDefault();
+          await attachLongText(pastedText);
+        }
+        return;
+      }
+
+      const availableSlots = Math.max(
+        0,
+        MAX_CHAT_ATTACHMENT_COUNT - attachments.length
+      );
+      const acceptedImageItems = imageItems.slice(0, availableSlots);
+      if (acceptedImageItems.length === 0) {
+        toast.error(
+          commonT("attachmentLimit", { count: MAX_CHAT_ATTACHMENT_COUNT })
+        );
+        return;
+      }
+      if (acceptedImageItems.length < imageItems.length) {
+        toast.error(
+          commonT("attachmentLimit", { count: MAX_CHAT_ATTACHMENT_COUNT })
+        );
+      }
+
+      event.preventDefault();
+
+      setUploadQueue((prev) => [...prev, commonT("pastedImage")]);
+
+      try {
+        const uploadPromises = acceptedImageItems
+          .map((item) => item.getAsFile())
+          .filter((file): file is File => file !== null)
+          .map((file) => uploadFile(file));
+
+        const uploadedAttachments = await Promise.all(uploadPromises);
+        const successfullyUploadedAttachments = uploadedAttachments.filter(
+          (attachment) =>
+            attachment !== undefined &&
+            attachment.url !== undefined &&
+            attachment.contentType !== undefined
+        );
+
+        setAttachments((curr) => [
+          ...curr,
+          ...(successfullyUploadedAttachments as Attachment[]),
+        ]);
+      } catch {
+        toast.error(commonT("uploadFailed"));
+      } finally {
+        setUploadQueue([]);
+      }
+    },
+    [
+      attachments.length,
+      attachLongText,
+      commonT,
+      selectedProject,
+      setAttachments,
+      t,
+      uploadFile,
+    ]
+  );
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+
+    textarea.addEventListener("paste", handlePaste);
+    return () => textarea.removeEventListener("paste", handlePaste);
+  }, [handlePaste]);
+
+  const handleCancelEditMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
+      e.preventDefault();
+      onCancelEdit?.();
+    },
+    [onCancelEdit]
+  );
+
+  const handleProjectPick = useCallback(
+    (project: { id: string; name: string }) => {
+      setSelectedProject((current) =>
+        current?.id === project.id
+          ? null
+          : { id: project.id, name: project.name }
+      );
+      setProjectPickerOpen(false);
+      // 选中后立刻把焦点还给输入框，展示正常文本光标
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    },
+    []
+  );
+
+  const handleClearProject = useCallback(() => {
+    setSelectedProject(null);
+    setProjectPickerOpen(false);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, []);
+
+  const handleLibrarySelect = useCallback(
+    (attachment: Attachment) => {
+      setAttachments((current) =>
+        current.some((item) => item.url === attachment.url)
+          ? current
+          : [...current, attachment].slice(0, MAX_CHAT_ATTACHMENT_COUNT)
+      );
+    },
+    [setAttachments]
+  );
+
+  const handleVoiceInput = useCallback(() => {
+    toast.info(t("chat.voiceInputIsComingSoon"));
+  }, [t]);
+
+  // 「+」菜单的「从我的文档选择」：与项目首页一致，打开受控文档库弹窗
+  const openLibraryPicker = useCallback(() => {
+    setLibraryPickerOpen(true);
+  }, []);
+
+  const handlePromptSubmit = useCallback(() => {
+    if (input.startsWith("/") && !input.includes(" ")) {
+      const query = input.slice(1).trim();
+      const cmd = slashCommands.find((c) => c.name === query);
+      if (cmd) {
+        handleSlashSelect(cmd);
+        return;
+      }
+    }
+    if (librarySelecting || uploadQueue.length > 0) {
+      return;
+    }
+    if (!(input.trim() || selectedSkill) && attachments.length === 0) {
+      return;
+    }
+    if (status === "ready" || status === "error") {
+      submitForm();
+    } else {
+      toast.error(chatT("waitForModel"));
+    }
+  }, [
+    attachments.length,
+    librarySelecting,
+    uploadQueue.length,
+    chatT,
+    handleSlashSelect,
+    input,
+    selectedSkill,
+    status,
+    submitForm,
+  ]);
+
+  const handleTextareaKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === "Backspace" && input === "" && selectedSkill) {
+        e.preventDefault();
+        setSelectedSkill(null);
+        setInput(`/${selectedSkill.name}`);
+        setSlashOpen(true);
+        setSlashQuery(selectedSkill.name);
+        setSlashIndex(0);
+        return;
+      }
+
+      if (slashOpen) {
+        const filtered = availableSlashCommands.filter((cmd) =>
+          cmd.name.startsWith(slashQuery.toLowerCase())
+        );
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setSlashIndex((i) => Math.min(i + 1, filtered.length - 1));
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setSlashIndex((i) => Math.max(i - 1, 0));
+          return;
+        }
+        if (e.key === "Enter" || e.key === "Tab") {
+          e.preventDefault();
+          if (filtered[slashIndex]) {
+            handleSlashSelect(filtered[slashIndex]);
+          }
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setSlashOpen(false);
+          return;
+        }
+      }
+      if (e.key === "Escape" && editingMessage && onCancelEdit) {
+        e.preventDefault();
+        onCancelEdit();
+      }
+    },
+    [
+      editingMessage,
+      availableSlashCommands,
+      handleSlashSelect,
+      input,
+      onCancelEdit,
+      selectedSkill,
+      setInput,
+      slashIndex,
+      slashOpen,
+      slashQuery,
+    ]
+  );
+  const isEmptyChat = messages.length === 0;
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Resize after controlled text changes or composer replacement, before paint.
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+
+    const resize = () => {
+      textarea.style.height = "auto";
+      const styles = getComputedStyle(textarea);
+      const minHeight = Number.parseFloat(styles.minHeight) || 0;
+      const maxHeight = Math.max(
+        minHeight,
+        Math.min(320, window.innerHeight * 0.4)
+      );
+      const height = Math.min(
+        maxHeight,
+        Math.max(minHeight, textarea.scrollHeight)
+      );
+      textarea.style.height = `${height}px`;
+      textarea.style.overflowY =
+        textarea.scrollHeight > height ? "auto" : "hidden";
+    };
+
+    resize();
+    let previousWidth = textarea.getBoundingClientRect().width;
+    const observer = new ResizeObserver(() => {
+      const nextWidth = textarea.getBoundingClientRect().width;
+      if (nextWidth !== previousWidth) {
+        previousWidth = nextWidth;
+        resize();
+      }
+    });
+    observer.observe(textarea);
+    window.addEventListener("resize", resize);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", resize);
+    };
+  }, [input, isEmptyChat]);
+
+  const canSubmit = Boolean(
+    input.trim() || selectedSkill || attachments.length > 0
+  );
+  const isGenerating = status === "submitted" || status === "streaming";
+
+  return (
+    <div className={cn("relative flex w-full flex-col gap-3", className)}>
+      {editingMessage && onCancelEdit ? (
+        <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+          <span>{t("chat.editingMessage")}</span>
+          <button
+            className="rounded px-1.5 py-0.5 text-muted-foreground/50 transition-colors hover:bg-muted hover:text-foreground"
+            onMouseDown={handleCancelEditMouseDown}
+            type="button"
+          >
+            {commonT("cancel")}
+          </button>
+        </div>
+      ) : null}
+
+      <input
+        accept={CHAT_ATTACHMENT_ACCEPT}
+        className="pointer-events-none fixed -top-4 -left-4 size-0.5 opacity-0"
+        multiple
+        onChange={handleFileChange}
+        ref={fileInputRef}
+        tabIndex={-1}
+        type="file"
+      />
+
+      {/* 「从我的文档选择」受控弹窗：与项目首页同款，仅由「+」菜单打开 */}
+      <LibraryFilePicker
+        attachments={attachments}
+        dialogOpen={libraryPickerOpen}
+        disabled={
+          isGenerating || selectedProject !== null || uploadQueue.length > 0
+        }
+        onBusyChange={setLibrarySelecting}
+        onDialogOpenChange={setLibraryPickerOpen}
+        onSelect={handleLibrarySelect}
+      />
+
+      <div className="relative">
+        {slashOpen ? (
+          <SlashCommandMenu
+            commands={availableSlashCommands}
+            onSelect={handleSlashSelect}
+            query={slashQuery}
+            selectedIndex={slashIndex}
+          />
+        ) : null}
+      </div>
+
+      <PromptInput
+        className={cn(
+          "openai-composer relative z-10",
+          isEmptyChat
+            ? "openai-composer--empty"
+            : "openai-composer--conversation"
+        )}
+        onSubmit={handlePromptSubmit}
+      >
+        {(attachments.length > 0 || uploadQueue.length > 0) && (
+          <div
+            className={cn(
+              "flex w-full self-start flex-wrap items-start gap-3 px-5 pt-4",
+              !isEmptyChat && "basis-full"
+            )}
+            data-testid="attachments-preview"
+          >
+            {attachments.map((attachment) => (
+              <AttachmentPreviewItem
+                attachment={attachment}
+                fileInputRef={fileInputRef}
+                key={attachment.url}
+                setAttachments={setAttachments}
+              />
+            ))}
+
+            {uploadQueue.map((filename) => (
+              <PreviewAttachment
+                attachment={{
+                  contentType: "",
+                  name: filename,
+                  url: "",
+                }}
+                isUploading={true}
+                key={filename}
+              />
+            ))}
+
+            {/* txt 附件可展开预览内容，复制来的换行按原文显示 */}
+            {attachments
+              .filter(
+                (attachment) =>
+                  attachment.contentType === "text/plain" ||
+                  attachment.name?.toLowerCase().endsWith(".txt")
+              )
+              .map((attachment) => (
+                <TextAttachmentPreview
+                  attachment={attachment}
+                  key={`preview-${attachment.url}`}
+                />
+              ))}
+          </div>
+        )}
+        <div className="flex min-h-[64px] w-full items-start px-5 pt-4">
+          {selectedSkill ? (
+            <span
+              className="mt-px inline-flex h-6 shrink-0 items-center gap-1.5 text-sm font-medium leading-6 text-primary"
+              data-testid="selected-skill"
+            >
+              <HammerIcon aria-hidden="true" className="size-4" />
+              <span>{selectedSkill.displayName}</span>
+            </span>
+          ) : null}
+          <PromptInputTextarea
+            className={cn(
+              "max-h-[min(320px,40dvh)] min-h-[48px] px-0 pb-1 pt-0 text-[16px] leading-6 placeholder:text-[var(--chat-placeholder)] focus-visible:border-transparent focus-visible:ring-0",
+              selectedSkill && "ml-2"
+            )}
+            data-testid="multimodal-input"
+            onChange={handleInput}
+            onKeyDown={handleTextareaKeyDown}
+            placeholder={
+              editingMessage
+                ? t("chat.editYourMessage")
+                : selectedSkill
+                  ? t("chat.describeYourTask")
+                  : selectedProject
+                    ? t("chat.newChatInProject", { name: selectedProject.name })
+                    : t("chat.askAnything")
+            }
+            ref={textareaRef}
+            value={input}
+          />
+        </div>
+        <PromptInputFooter className="px-3 pb-2.5 pt-1">
+          <PromptInputTools>
+            <AttachmentsMenuButton
+              disabled={
+                selectedProject !== null ||
+                librarySelecting ||
+                uploadQueue.length > 0
+              }
+              fileInputRef={fileInputRef}
+              isGenerating={isGenerating}
+              onPickFromLibrary={openLibraryPicker}
+            />
+          </PromptInputTools>
+          <PromptInputTools className="gap-1">
+            <ModelSelectorCompact
+              onModelChange={onModelChange}
+              selectedModelId={selectedModelId}
+            />
+            <Button
+              aria-label={t("chat.voiceInput")}
+              className="size-10 rounded-full text-foreground hover:bg-muted"
+              onClick={handleVoiceInput}
+              size="icon-sm"
+              type="button"
+              variant="ghost"
+            >
+              <MicIcon className="size-[19px]" />
+            </Button>
+            {isGenerating ? (
+              <StopButton setMessages={setMessages} stop={stopGeneration} />
+            ) : (
+              <PromptInputSubmit
+                className={cn(
+                  "size-10 rounded-full border-0 transition-colors duration-150",
+                  canSubmit
+                    ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                    : "bg-[#b8d4ff] text-white"
+                )}
+                data-testid="send-button"
+                disabled={
+                  !canSubmit ||
+                  uploadQueue.length > 0 ||
+                  librarySelecting ||
+                  creatingProjectChat
+                }
+                status={status}
+                variant="secondary"
+              >
+                <ArrowUpIcon className="size-5" />
+              </PromptInputSubmit>
+            )}
+          </PromptInputTools>
+        </PromptInputFooter>
+      </PromptInput>
+
+      {isEmptyChat ? (
+        <div className="relative z-0 mx-5 -mt-4 flex h-12 items-end rounded-b-2xl bg-[#f7f7f7] px-1.5 pb-1.5 text-sm text-muted-foreground dark:bg-muted">
+          <div className="flex min-w-0 items-center gap-2">
+            <Popover
+              onOpenChange={setProjectPickerOpen}
+              open={projectPickerOpen}
+            >
+              <PopoverTrigger asChild>
+                <button
+                  aria-label={t("chat.chooseProject")}
+                  className={cn(
+                    "flex h-8 min-w-0 items-center gap-2 rounded-lg px-2 transition-colors hover:bg-background hover:text-foreground",
+                    selectedProject &&
+                      "bg-background/70 font-medium text-foreground"
+                  )}
+                  type="button"
+                >
+                  <FolderIcon className="size-[18px] shrink-0" />
+                  <span className="max-w-[180px] truncate">
+                    {selectedProject ? selectedProject.name : t("chat.project")}
+                  </span>
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="start"
+                className="w-72 p-1.5"
+                data-testid="project-picker"
+                side="top"
+                sideOffset={8}
+              >
+                {projects.length === 0 ? (
+                  <p className="px-3 py-6 text-center text-[13px] text-muted-foreground">
+                    {projectsLoading ? "…" : t("chat.noProjectsYet")}
+                  </p>
+                ) : (
+                  <div className="max-h-[260px] overflow-y-auto">
+                    {projects.map((project) => (
+                      <ProjectPickerItem
+                        isSelected={selectedProject?.id === project.id}
+                        key={project.id}
+                        onPick={handleProjectPick}
+                        project={project}
+                      />
+                    ))}
+                  </div>
+                )}
+                {selectedProject ? (
+                  <>
+                    <div className="mx-2 my-1 h-px bg-border" />
+                    <button
+                      className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      onClick={handleClearProject}
+                      type="button"
+                    >
+                      {t("chat.clearProjectSelection")}
+                    </button>
+                  </>
+                ) : null}
+              </PopoverContent>
+            </Popover>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export const MultimodalInput = memo(
+  PureMultimodalInput,
+  (prevProps, nextProps) => {
+    if (prevProps.input !== nextProps.input) {
+      return false;
+    }
+    if (prevProps.status !== nextProps.status) {
+      return false;
+    }
+    if (!equal(prevProps.attachments, nextProps.attachments)) {
+      return false;
+    }
+    if (prevProps.selectedVisibilityType !== nextProps.selectedVisibilityType) {
+      return false;
+    }
+    if (prevProps.selectedModelId !== nextProps.selectedModelId) {
+      return false;
+    }
+    if (prevProps.disableSkillCommands !== nextProps.disableSkillCommands) {
+      return false;
+    }
+    if (prevProps.editingMessage !== nextProps.editingMessage) {
+      return false;
+    }
+    if (prevProps.isLoading !== nextProps.isLoading) {
+      return false;
+    }
+    if (prevProps.messages.length !== nextProps.messages.length) {
+      return false;
+    }
+
+    return true;
+  }
+);
+
+function PureAttachmentPreviewItem({
+  attachment,
+  fileInputRef,
+  setAttachments,
+}: {
+  attachment: Attachment;
+  fileInputRef: React.MutableRefObject<HTMLInputElement | null>;
+  setAttachments: Dispatch<SetStateAction<Attachment[]>>;
+}) {
+  const handleRemove = useCallback(() => {
+    setAttachments((currentAttachments) =>
+      currentAttachments.filter((a) => a.url !== attachment.url)
+    );
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }, [attachment.url, fileInputRef, setAttachments]);
+
+  return (
+    <PreviewAttachment
+      attachment={attachment}
+      composer
+      onRemove={handleRemove}
+    />
+  );
+}
+
+const AttachmentPreviewItem = memo(PureAttachmentPreviewItem);
+
+function PureProjectPickerItem({
+  isSelected,
+  onPick,
+  project,
+}: {
+  isSelected: boolean;
+  onPick: (project: { id: string; name: string }) => void;
+  project: { id: string; name: string };
+}) {
+  const handleSelect = useCallback(() => {
+    onPick(project);
+  }, [onPick, project]);
+
+  return (
+    <button
+      className={cn(
+        "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] transition-colors hover:bg-muted",
+        isSelected && "bg-muted"
+      )}
+      onClick={handleSelect}
+      type="button"
+    >
+      <FolderIcon
+        aria-hidden="true"
+        className="size-4 shrink-0 text-muted-foreground"
+      />
+      <span className="min-w-0 flex-1 truncate">{project.name}</span>
+      {isSelected ? (
+        <CheckIcon
+          aria-hidden="true"
+          className="size-4 shrink-0 text-foreground"
+        />
+      ) : null}
+    </button>
+  );
+}
+
+const ProjectPickerItem = memo(PureProjectPickerItem);
+
+function PureAttachmentsMenuButton({
+  disabled = false,
+  fileInputRef,
+  isGenerating,
+  onPickFromLibrary,
+}: {
+  disabled?: boolean;
+  fileInputRef: React.MutableRefObject<HTMLInputElement | null>;
+  isGenerating: boolean;
+  onPickFromLibrary: () => void;
+}) {
+  const t = useTranslations("chat");
+
+  const handleUploadFromComputer = useCallback(() => {
+    fileInputRef.current?.click();
+  }, [fileInputRef]);
+
+  // 与项目首页输入框「+」同款：下拉提供「从电脑上传」与「从我的文档选择」
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          aria-label={t("uploadMenu")}
+          className="composer-plus size-10 shrink-0 cursor-pointer rounded-full p-0 text-foreground transition-colors duration-150 hover:bg-muted focus-visible:bg-muted data-[state=open]:bg-muted"
+          data-testid="attachments-button"
+          disabled={disabled || isGenerating}
+          size="icon"
+          variant="ghost"
+        >
+          <PlusIcon className="size-5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        className="w-[min(420px,calc(100vw-32px))] rounded-2xl p-2"
+        side="bottom"
+        sideOffset={12}
+      >
+        <DropdownMenuItem
+          className="gap-3 rounded-xl px-3 py-3"
+          onSelect={handleUploadFromComputer}
+        >
+          <PaperclipIcon className="size-5 shrink-0" />
+          <span>{t("uploadMenu")}</span>
+          <span className="text-muted-foreground">
+            {t("uploadFromComputer")}
+          </span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="gap-3 rounded-xl px-3 py-3"
+          onSelect={onPickFromLibrary}
+        >
+          <LibraryBigIcon className="size-5 shrink-0" />
+          <span>{t("pickDocuments")}</span>
+          <span className="text-muted-foreground">{t("browseDocuments")}</span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+const AttachmentsMenuButton = memo(PureAttachmentsMenuButton);
+
+function ModelSelectorOption({
+  model,
+  onModelChange,
+  selectedModelId,
+  setOpen,
+}: {
+  model: ChatModel;
+  onModelChange?: (modelId: string) => void;
+  selectedModelId: string;
+  setOpen: Dispatch<SetStateAction<boolean>>;
+}) {
+  const isSelected = model.id === selectedModelId;
+
+  // 插件模型：图标从模型插件包内读取（/api/models/icon 按 provider key 下发）
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+  const iconSrc = model.providerKey
+    ? `${basePath}/api/models/icon?provider=${model.providerKey}`
+    : undefined;
+  const logoProvider = model.providerKey ?? model.id.split("/")[0];
+
+  const handleSelect = useCallback(() => {
+    onModelChange?.(model.id);
+    setCookie("chat-model", model.id);
+    setOpen(false);
+    setTimeout(() => {
+      document
+        .querySelector<HTMLTextAreaElement>("[data-testid='multimodal-input']")
+        ?.focus();
+    }, 50);
+  }, [model.id, onModelChange, setOpen]);
+
+  return (
+    <ModelSelectorItem
+      className="w-full gap-2 px-3 py-2 text-[13px] data-[selected=true]:bg-muted data-[selected=true]:text-foreground"
+      onSelect={handleSelect}
+      value={model.id}
+    >
+      <span className="flex size-4 shrink-0 items-center justify-center overflow-hidden rounded-[5px] bg-muted ring-1 ring-border/50">
+        <ModelSelectorLogo
+          className={iconSrc ? "size-full" : "size-[18px] dark:invert"}
+          provider={logoProvider}
+          src={iconSrc}
+        />
+      </span>
+      <span className="min-w-0 flex-1 truncate text-left font-medium">
+        {model.name}
+      </span>
+      {isSelected ? <CheckIcon className="size-4 text-foreground" /> : null}
+    </ModelSelectorItem>
+  );
+}
+
+function PureModelSelectorCompact({
+  selectedModelId,
+  onModelChange,
+}: {
+  selectedModelId: string;
+  onModelChange?: (modelId: string) => void;
+}) {
+  const t = useTranslations("chat");
+  const [open, setOpen] = useState(false);
+  const { data: modelsData, isLoading } = useSWR(
+    `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/models`,
+    (url: string) => fetch(url).then((r) => r.json()),
+    { dedupingInterval: 3_600_000, revalidateOnFocus: false }
+  );
+
+  // 模型管理平台是唯一模型来源；未配置任何模型时展示「未配置模型」
+  const activeModels: ChatModel[] = modelsData?.models ?? [];
+  const modelsConfigured = activeModels.length > 0;
+
+  const selectedModel =
+    activeModels.find((m: ChatModel) => m.id === selectedModelId) ??
+    activeModels.find((m: ChatModel) => m.id === modelsData?.defaultModelId) ??
+    activeModels[0];
+  const selectorLabel = isLoading
+    ? "…"
+    : (selectedModel?.name ?? t("noModelConfigured"));
+
+  return (
+    <ModelSelector onOpenChange={setOpen} open={open}>
+      <ModelSelectorTrigger asChild>
+        <Button
+          className="h-8 max-w-[156px] gap-1 rounded-full border-0 bg-muted px-3 text-[13px] font-normal text-foreground shadow-none transition-colors hover:bg-secondary aria-expanded:bg-muted dark:bg-transparent dark:hover:bg-white/5 dark:aria-expanded:bg-transparent"
+          data-testid="model-selector"
+          variant="ghost"
+        >
+          <ModelSelectorName>{selectorLabel}</ModelSelectorName>
+          <span className="shrink-0 text-muted-foreground">
+            <ChevronDownIcon size={13} />
+          </span>
+        </Button>
+      </ModelSelectorTrigger>
+      <ModelSelectorContent commandDefaultValue={selectedModel?.id ?? ""}>
+        <ModelSelectorList className="max-h-[min(410px,60vh)] p-1.5">
+          {modelsConfigured ? (
+            // 平铺列表：不展示供应商分组标题，模型之间不加分隔线
+            <div>
+              {activeModels.map((model) => (
+                <ModelSelectorOption
+                  key={model.id}
+                  model={model}
+                  onModelChange={onModelChange}
+                  selectedModelId={selectedModel?.id ?? ""}
+                  setOpen={setOpen}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="px-4 py-8 text-center text-[13px] text-muted-foreground">
+              {t("noModelsConfiguredHint")}
+            </div>
+          )}
+        </ModelSelectorList>
+      </ModelSelectorContent>
+    </ModelSelector>
+  );
+}
+
+const ModelSelectorCompact = memo(PureModelSelectorCompact);
+
+function PureStopButton({
+  stop,
+  setMessages,
+}: {
+  stop: () => void;
+  setMessages: UseChatHelpers<ChatMessage>["setMessages"];
+}) {
+  const { t } = usePreferences();
+  const handleClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      stop();
+      setMessages((messages) => messages);
+    },
+    [setMessages, stop]
+  );
+
+  return (
+    <Button
+      aria-label={t("chat.stopGenerating")}
+      className="size-10 rounded-full bg-primary p-1 text-primary-foreground transition-all duration-150 hover:bg-primary/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground/50"
+      data-testid="stop-button"
+      onClick={handleClick}
+    >
+      <StopIcon size={14} />
+    </Button>
+  );
+}
+
+const StopButton = memo(PureStopButton);
