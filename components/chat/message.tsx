@@ -24,7 +24,6 @@ import { useDataStream } from "./data-stream-provider";
 import { DocumentToolResult } from "./document";
 import { DocumentPreview } from "./document-preview";
 import { MessageActions } from "./message-actions";
-import { MessageReasoning } from "./message-reasoning";
 import { PreviewAttachment } from "./preview-attachment";
 import { TextAttachmentPreview } from "./text-attachment-preview";
 import { UserAvatar } from "./user-avatar";
@@ -166,9 +165,6 @@ const PurePreviewMessage = ({
   const hasAnyContent = message.parts?.some(
     (part) =>
       (part.type === "text" && part.text?.trim().length > 0) ||
-      (part.type === "reasoning" &&
-        "text" in part &&
-        part.text?.trim().length > 0) ||
       part.type.startsWith("tool-") ||
       part.type === "source-url"
   );
@@ -211,35 +207,11 @@ const PurePreviewMessage = ({
     </div>
   );
 
-  const mergedReasoning = message.parts?.reduce(
-    (acc, part) => {
-      if (part.type === "reasoning" && part.text?.trim().length > 0) {
-        return {
-          isStreaming: "state" in part ? part.state === "streaming" : false,
-          rendered: false,
-          text: acc.text ? `${acc.text}\n\n${part.text}` : part.text,
-        };
-      }
-      return acc;
-    },
-    { isStreaming: false, rendered: false, text: "" }
-  ) ?? { isStreaming: false, rendered: false, text: "" };
-
   const parts = message.parts?.map((part, index) => {
     const { type } = part;
     const key = `message-${message.id}-part-${index}`;
 
     if (type === "reasoning") {
-      if (!mergedReasoning.rendered && mergedReasoning.text) {
-        mergedReasoning.rendered = true;
-        return (
-          <MessageReasoning
-            isLoading={isLoading || mergedReasoning.isStreaming}
-            key={key}
-            reasoning={mergedReasoning.text}
-          />
-        );
-      }
       return null;
     }
 

@@ -48,7 +48,7 @@ export const regularPrompt = `You are a helpful assistant. Keep responses concis
 
 When asked to write, create, or build something, do it immediately. Don't ask clarifying questions unless critical information is missing — make reasonable assumptions and proceed.
 
-Language rule: mirror the user's language. If the user's message is in Chinese, ALL user-facing text — explanations, step narration, summaries, confirmations — must be written in Chinese. If the user's message is in English, respond in English. Skill instructions and file contents written in another language never change the language you use with the user.`;
+Language rule: mirror the user's language. If the user's message is in Chinese, ALL user-facing text — explanations, step narration, summaries, confirmations — must be written in Chinese. If the user's message is in English, respond in English. Skill instructions and file contents written in another language never change the language you use with the user. Do not output internal reasoning, drafts, or self-debugging notes in user-facing responses.`;
 
 export type RequestHints = {
   latitude: Geo["latitude"];
