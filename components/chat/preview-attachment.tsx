@@ -1,13 +1,7 @@
 "use client";
 
-import {
-  FileIcon,
-  FileSpreadsheetIcon,
-  FileTextIcon,
-  PresentationIcon,
-  WorkflowIcon,
-} from "lucide-react";
 import Image from "next/image";
+import { FileTypeIcon } from "@/components/documents/file-type-icon";
 import { isChatFileUrl, isVisionAttachment } from "@/lib/ai/attachment-types";
 import type { Attachment } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -31,17 +25,6 @@ export const PreviewAttachment = ({
   const { t } = usePreferences();
   const { name, url, contentType } = attachment;
   const extension = name?.split(".").at(-1)?.toLocaleUpperCase() ?? "FILE";
-  const FileTypeIcon =
-    extension === "XLSX" || extension === "ODS" || extension === "CSV"
-      ? FileSpreadsheetIcon
-      : extension === "PPTX" || extension === "ODP"
-        ? PresentationIcon
-        : extension === "DRAWIO"
-          ? WorkflowIcon
-          : ["DOCX", "ODT", "PDF", "RTF", "TXT", "MD"].includes(extension)
-            ? FileTextIcon
-            : FileIcon;
-
   const isImage = isVisionAttachment(contentType ?? "");
 
   return (
@@ -77,7 +60,9 @@ export const PreviewAttachment = ({
           )}
         >
           <FileTypeIcon
-            className={cn("shrink-0", composer ? "size-5" : "size-7")}
+            className={cn("shrink-0", composer ? "size-7" : "size-9")}
+            contentType={contentType}
+            filename={name}
           />
           {composer ? null : (
             <span className="max-w-full truncate text-[10px] font-medium">

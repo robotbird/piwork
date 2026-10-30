@@ -50,6 +50,7 @@ import {
 import { uploadLimitBytes } from "@/lib/uploads/settings";
 import { cn } from "@/lib/utils";
 import styles from "./document-library.module.css";
+import { FileTypeIcon } from "./file-type-icon";
 
 const tabs = [
   "all",
@@ -565,7 +566,12 @@ export function DocumentLibrary() {
                             />
                           ) : (
                             <div className={styles.cover}>
-                              <Icon className={styles.coverIcon} />
+                              <FileTypeIcon
+                                className={styles.coverIcon}
+                                contentType={item.contentType}
+                                fallback={<Icon className={styles.coverIcon} />}
+                                filename={item.name}
+                              />
                               <span className={styles.coverLabel}>
                                 {t(label)}
                               </span>
@@ -585,7 +591,12 @@ export function DocumentLibrary() {
                             color
                           )}
                         >
-                          <Icon className="size-4" />
+                          <FileTypeIcon
+                            className="size-4"
+                            contentType={item.contentType}
+                            fallback={<Icon className="size-4" />}
+                            filename={item.name}
+                          />
                         </span>
                         <div className={styles.fileDetails}>
                           <a
