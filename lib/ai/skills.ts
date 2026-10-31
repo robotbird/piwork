@@ -159,20 +159,13 @@ export function extractProjectSkillArchive({
     });
   }
 
-  let files = unzipSkillEntries(content);
-  const manifests = files.filter(
-    (file) => file.path.split("/").at(-1) === "SKILL.md"
+  // Same folder-name rules as link installs: prefer the SKILL.md frontmatter
+  // name, else sanitize the archive filename/wrapper folder (e.g.
+  // ai-ppt-skill-1.0.0) instead of rejecting the upload outright.
+  return normalizeSkillInstallArchive(
+    unzipSkillEntries(content),
+    filename.slice(0, -4)
   );
-  if (manifests.length === 1 && manifests[0].path === "SKILL.md") {
-    const archiveRoot = filename.slice(0, -4);
-    validateSkillName(archiveRoot);
-    files = files.map((file) => ({
-      ...file,
-      path: `${archiveRoot}/${file.path}`,
-    }));
-  }
-
-  return files;
 }
 
 const VCS_METADATA_ROOT_ENTRIES = new Set([
@@ -998,10 +991,9 @@ export async function installProjectSkill({
       "SKILL.md must be at the root of the selected skill folder."
     );
   }
-  const uploadedRoot = manifestSegments.slice(0, -1).join("/");
-  validateSkillName(uploadedRoot);
+  const requestedRoot = manifestSegments.slice(0, -1).join("/");
   const relativeFiles = normalizedFiles.map((file) => {
-    if (uploadedRoot && !file.path.startsWith(`${uploadedRoot}/`)) {
+    if (requestedRoot && !file.path.startsWith(`${requestedRoot}/`)) {
       throw new Error(
         "All uploaded files must belong to the same skill folder."
       );
@@ -1009,9 +1001,22 @@ export async function installProjectSkill({
 
     return {
       content: file.content,
-      path: uploadedRoot ? file.path.slice(uploadedRoot.length + 1) : file.path,
+      path: requestedRoot
+        ? file.path.slice(requestedRoot.length + 1)
+        : file.path,
     };
   });
+  // The uploaded folder name is just packaging; when it is not a usable skill
+  // name (e.g. ai-ppt-skill-1.0.0) derive the install folder from the
+  // frontmatter name, else a sanitized folder name. The Pi loader and
+  // validateSkillName below remain the authority on the final skill name.
+  const uploadedRoot = isUsableSkillFolderName(requestedRoot)
+    ? requestedRoot
+    : pickInstallFolderName(
+        skillManifests[0].content,
+        requestedRoot,
+        requestedRoot
+      );
   const uniquePaths = new Set(relativeFiles.map((file) => file.path));
   if (uniquePaths.size !== relativeFiles.length) {
     throw new Error("The upload contains duplicate file paths.");

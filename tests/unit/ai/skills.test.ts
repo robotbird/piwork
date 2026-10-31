@@ -211,6 +211,146 @@ test("wraps a root-level SKILL.md using the ZIP filename", () => {
   assert.equal(files[0]?.path, "root-zip-skill/SKILL.md");
 });
 
+test("installs a versioned ZIP filename using the frontmatter name", () => {
+  const archive = zipSync({
+    "SKILL.md": new TextEncoder().encode(
+      [
+        "---",
+        "name: ai-ppt-skill",
+        "description: Builds presentations from documents.",
+        "---",
+      ].join("\n")
+    ),
+  });
+
+  const files = extractProjectSkillArchive({
+    content: archive,
+    filename: "ai-ppt-skill-1.0.0.zip",
+  });
+
+  assert.deepEqual(
+    files.map((file) => file.path),
+    ["ai-ppt-skill/SKILL.md"]
+  );
+});
+
+test("installs a versioned top-level directory from a ZIP", () => {
+  const archive = zipSync({
+    "ai-ppt-skill-1.0.0/SKILL.md": new TextEncoder().encode(
+      [
+        "---",
+        "name: ai-ppt-skill",
+        "description: Builds presentations from documents.",
+        "---",
+      ].join("\n")
+    ),
+    "ai-ppt-skill-1.0.0/scripts/build.py": new TextEncoder().encode("print()"),
+    "README.md": new TextEncoder().encode("Repository readme"),
+  });
+
+  const files = extractProjectSkillArchive({
+    content: archive,
+    filename: "ai-ppt-skill-1.0.0.zip",
+  });
+
+  assert.deepEqual(
+    new Set(files.map((file) => file.path)),
+    new Set(["ai-ppt-skill/SKILL.md", "ai-ppt-skill/scripts/build.py"])
+  );
+});
+
+test("sanitizes a versioned folder name when frontmatter name is missing", () => {
+  const archive = zipSync({
+    "SKILL.md": new TextEncoder().encode(
+      ["---", "description: Falls back to a sanitized name.", "---"].join("\n")
+    ),
+  });
+
+  const files = extractProjectSkillArchive({
+    content: archive,
+    filename: "ai-ppt-skill-1.0.0.zip",
+  });
+
+  assert.deepEqual(
+    files.map((file) => file.path),
+    ["ai-ppt-skill-1-0-0/SKILL.md"]
+  );
+});
+
+test("installs a versioned skill ZIP end to end", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "piwork-skills-zip-"));
+
+  try {
+    const archive = zipSync({
+      "ai-ppt-skill-1.0.0/SKILL.md": new TextEncoder().encode(
+        [
+          "---",
+          "name: ai-ppt-skill",
+          "description: Builds presentations from documents.",
+          "---",
+        ].join("\n")
+      ),
+    });
+    const files = extractProjectSkillArchive({
+      content: archive,
+      filename: "ai-ppt-skill-1.0.0.zip",
+    });
+
+    const installed = await installProjectSkill({ cwd, files });
+
+    assert.equal(installed.name, "ai-ppt-skill");
+    assert.equal(
+      await readFile(join(cwd, ".pi/skills/ai-ppt-skill/SKILL.md"), "utf8"),
+      [
+        "---",
+        "name: ai-ppt-skill",
+        "description: Builds presentations from documents.",
+        "---",
+      ].join("\n")
+    );
+  } finally {
+    await rm(cwd, { force: true, recursive: true });
+  }
+});
+
+test("installs a folder upload with a versioned folder name", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "piwork-skills-folder-"));
+
+  try {
+    const installed = await installProjectSkill({
+      cwd,
+      files: [
+        {
+          content: new TextEncoder().encode(
+            [
+              "---",
+              "name: ai-ppt-skill",
+              "description: Builds presentations from documents.",
+              "---",
+            ].join("\n")
+          ),
+          path: "ai-ppt-skill-1.0.0/SKILL.md",
+        },
+        {
+          content: new TextEncoder().encode("Guide"),
+          path: "ai-ppt-skill-1.0.0/references/guide.md",
+        },
+      ],
+    });
+
+    assert.equal(installed.name, "ai-ppt-skill");
+    assert.equal(
+      await readFile(
+        join(cwd, ".pi/skills/ai-ppt-skill/references/guide.md"),
+        "utf8"
+      ),
+      "Guide"
+    );
+  } finally {
+    await rm(cwd, { force: true, recursive: true });
+  }
+});
+
 test("rejects path traversal in a skill ZIP", () => {
   const archive = zipSync({
     "../SKILL.md": new TextEncoder().encode("unsafe"),
