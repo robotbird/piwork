@@ -1,0 +1,72 @@
+# Build this repository at the pushed tag and publish its deployment artifact.
+name: Release Build
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {} # Manual runs validate the build without publishing.
+
+permissions:
+  contents: write # Required to create the GitHub Release.
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4 # Read the version from package.json.
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Restore Next.js build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .next/cache
+          key: next-${{ runner.os }}-${{ github.sha }}
+          restore-keys: next-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build production app
+        run: pnpm build
+        # CI has no POSTGRES_URL; deploy.sh runs migrations on the server.
+
+      - name: Write release metadata
+        run: |
+          printf 'release=%s\ngit=%s\nbuilt_at=%s\n' \
+            "${GITHUB_REF_NAME:-manual}" \
+            "${GITHUB_SHA}" \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .release-info
+
+      - name: Package deployment artifact
+        run: |
+          # Write outside the source directory to avoid archiving a changing file.
+          tar -czf /tmp/piwork.tar.gz \
+            --exclude='./node_modules' \
+            --exclude='./.git' \
+            --exclude='./.next/cache' \
+            --exclude='./.env.local' \
+            --exclude='./.env' \
+            --exclude='./.next/dev' \
+            --exclude='._*' \
+            .
+          mv /tmp/piwork.tar.gz piwork.tar.gz
+          ls -lh piwork.tar.gz
+
+      - name: Save Next.js build cache
+        uses: actions/cache/save@v4
+        with:
+          path: .next/cache
+          key: next-${{ runner.os }}-${{ github.sha }}
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: piwork.tar.gz
+          generate_release_notes: true
