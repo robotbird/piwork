@@ -1407,8 +1407,11 @@
   },
   "reasoning": {
     "thinking": "Thinking…",
+    "thinkingWithDuration": "Thinking… {duration}",
     "thoughtBriefly": "Thought for a few seconds",
-    "thoughtFor": "Thought for {duration} seconds"
+    "thoughtFor": "Thought for {duration} seconds",
+    "thoughtForDuration": "Thought for {duration}",
+    "stepsLabel": "Thinking steps"
   },
   "adminApi": {
     "operationFailed": "Operation failed",

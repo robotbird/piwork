@@ -1407,8 +1407,11 @@
   },
   "reasoning": {
     "thinking": "思考中…",
+    "thinkingWithDuration": "思考中… {duration}",
     "thoughtBriefly": "思考了几秒钟",
-    "thoughtFor": "思考了 {duration} 秒"
+    "thoughtFor": "思考了 {duration} 秒",
+    "thoughtForDuration": "思考了 {duration}",
+    "stepsLabel": "思考步骤"
   },
   "adminApi": {
     "operationFailed": "操作失败",

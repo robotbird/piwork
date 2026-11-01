@@ -93,6 +93,7 @@ export class PiEventNormalizer {
         }
         return [
           {
+            at: Date.now(),
             channel,
             contentIndex: update.contentIndex,
             ...(delta === undefined ? {} : { delta }),

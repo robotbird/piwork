@@ -13,12 +13,14 @@ function delta(
   sequence: number,
   contentIndex: number,
   phase: "start" | "delta" | "end",
-  text?: string
+  text?: string,
+  at?: number
 ): RuntimeEvent {
   return {
     channel,
     contentIndex,
     ...(phase === "delta" && text !== undefined ? { delta: text } : {}),
+    ...(at === undefined ? {} : { at }),
     phase,
     sequence,
     type: "message.delta",
@@ -118,4 +120,37 @@ test("空事件序列与终态事件：产出空 parts", () => {
     []
   );
   assert.deepEqual(buildAssistantMessageParts([]), []);
+});
+
+test("reasoning 块带 at 的 start/end 对：落库 durationMs；缺 at 不写字段", () => {
+  const parts = buildAssistantMessageParts([
+    delta("reasoning", 1, 0, "start", undefined, 1000),
+    delta("reasoning", 1, 0, "delta", "第一步", 1500),
+    delta("reasoning", 1, 0, "end", undefined, 4200),
+    delta("text", 1, 1, "start", undefined, 4300),
+    delta("text", 1, 1, "end", undefined, 5000),
+    delta("reasoning", 1, 2, "start", undefined, 6000),
+    delta("reasoning", 1, 2, "delta", "第二步", 6100),
+    delta("reasoning", 1, 2, "end", undefined, 7000),
+    delta("reasoning", 1, 3, "start"),
+    delta("reasoning", 1, 3, "delta", "无时刻"),
+    delta("reasoning", 1, 3, "end"),
+  ]);
+  assert.deepEqual(parts, [
+    { durationMs: 3200, state: "done", text: "第一步", type: "reasoning" },
+    { state: "done", text: "", type: "text" },
+    { durationMs: 1000, state: "done", text: "第二步", type: "reasoning" },
+    // 无 at 的块保持原形状，不携带 durationMs
+    { state: "done", text: "无时刻", type: "reasoning" },
+  ]);
+});
+
+test("流式中（只有 start/delta）：不产出 durationMs", () => {
+  const parts = buildAssistantMessageParts([
+    delta("reasoning", 1, 0, "start", undefined, 1000),
+    delta("reasoning", 1, 0, "delta", "思考中", 1200),
+  ]);
+  assert.deepEqual(parts, [
+    { state: "streaming", text: "思考中", type: "reasoning" },
+  ]);
 });

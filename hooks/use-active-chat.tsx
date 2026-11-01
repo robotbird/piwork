@@ -19,7 +19,10 @@ import {
 } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
-import { useDataStream } from "@/components/chat/data-stream-provider";
+import {
+  appendReasoningTiming,
+  useDataStream,
+} from "@/components/chat/data-stream-provider";
 import { getChatHistoryPaginationKey } from "@/components/chat/sidebar-history";
 import { toast } from "@/components/chat/toast";
 import type { VisibilityType } from "@/components/chat/visibility-selector";
@@ -78,7 +81,12 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
   const { t, language } = usePreferences();
   const pathname = usePathname();
   const sandboxView = useSearchParams().get("sandbox");
-  const { setDataStream, setToolStatus, setWaitingStatus } = useDataStream();
+  const {
+    setDataStream,
+    setReasoningTimings,
+    setToolStatus,
+    setWaitingStatus,
+  } = useDataStream();
   const { mutate } = useSWRConfig();
 
   const chatIdFromUrl = extractChatId(pathname);
@@ -170,6 +178,12 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
           runId: dataPart.data.runId,
           seq: dataPart.data.seq,
         };
+        return;
+      }
+      if (dataPart.type === "data-reasoning-timing") {
+        setReasoningTimings((timings) =>
+          appendReasoningTiming(timings, dataPart.data)
+        );
         return;
       }
       setDataStream((ds) => (ds ? [...ds, dataPart] : []));
@@ -269,6 +283,14 @@ export function ActiveChatProvider({ children }: { children: ReactNode }) {
       setToolStatus(undefined);
     }
   }, [status, setToolStatus, setWaitingStatus]);
+
+  // reasoning 计时只在新一轮开始时清空：刚完成的消息在落库 parts 刷新前
+  // 仍依赖这批时刻展示耗时（ready/error 不清）。
+  useEffect(() => {
+    if (status === "submitted") {
+      setReasoningTimings([]);
+    }
+  }, [status, setReasoningTimings]);
 
   // useChat 在 id 切换时创建新实例，每次进入历史对话都需要水合。
   // 新对话只更新 URL（id 不变）时保留本地流，不用 DB 快照覆盖正在生成的消息。

@@ -61,11 +61,61 @@ test("reasoning 通道 delta 映射为 reasoning-* chunk", () => {
       type: "message.delta",
     }),
   ];
+  // 无 at 的历史形状：不额外下发 timing chunk
   assert.deepEqual(chunks, [
     { id: "reasoning-1-0", type: "reasoning-start" },
     { delta: "思考中", id: "reasoning-1-0", type: "reasoning-delta" },
     { id: "reasoning-1-0", type: "reasoning-end" },
   ]);
+});
+
+test("reasoning start/end 带 at：追加 transient data-reasoning-timing", () => {
+  assert.deepEqual(
+    [
+      ...runtimeEventToUIMessageChunks({
+        at: 1000,
+        channel: "reasoning",
+        contentIndex: 0,
+        phase: "start",
+        sequence: 1,
+        type: "message.delta",
+      }),
+      ...runtimeEventToUIMessageChunks({
+        at: 4200,
+        channel: "reasoning",
+        contentIndex: 0,
+        phase: "end",
+        sequence: 1,
+        type: "message.delta",
+      }),
+    ],
+    [
+      { id: "reasoning-1-0", type: "reasoning-start" },
+      {
+        data: { at: 1000, id: "reasoning-1-0", phase: "start" },
+        transient: true,
+        type: "data-reasoning-timing",
+      },
+      { id: "reasoning-1-0", type: "reasoning-end" },
+      {
+        data: { at: 4200, id: "reasoning-1-0", phase: "end" },
+        transient: true,
+        type: "data-reasoning-timing",
+      },
+    ]
+  );
+  // text 通道即使带 at 也不下发 timing
+  assert.deepEqual(
+    runtimeEventToUIMessageChunks({
+      at: 1000,
+      channel: "text",
+      contentIndex: 0,
+      phase: "start",
+      sequence: 1,
+      type: "message.delta",
+    }),
+    [{ id: "text-1-0", type: "text-start" }]
+  );
 });
 
 test("tool 通道 delta 不产出 wire chunk（仅驱动活跃标记）", () => {

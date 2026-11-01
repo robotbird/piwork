@@ -37,13 +37,24 @@ export function runtimeEventToUIMessageChunks(
       }
       return [{ id, type: "text-end" }];
     }
+    const chunks: ChatStreamChunk[] = [];
     if (event.phase === "start") {
-      return [{ id, type: "reasoning-start" }];
+      chunks.push({ id, type: "reasoning-start" });
+    } else if (event.phase === "delta") {
+      chunks.push({ delta: event.delta ?? "", id, type: "reasoning-delta" });
+    } else {
+      chunks.push({ id, type: "reasoning-end" });
     }
-    if (event.phase === "delta") {
-      return [{ delta: event.delta ?? "", id, type: "reasoning-delta" }];
+    // 服务端起止时刻随块边界下发（transient）：客户端计时不受 chunk 到达
+    // 时刻影响，断线重连的重放批次也能还原真实耗时
+    if (event.at !== undefined && event.phase !== "delta") {
+      chunks.push({
+        data: { at: event.at, id, phase: event.phase },
+        transient: true,
+        type: "data-reasoning-timing",
+      });
     }
-    return [{ id, type: "reasoning-end" }];
+    return chunks;
   }
 
   if (event.type === "tool.started") {

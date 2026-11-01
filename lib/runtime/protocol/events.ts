@@ -55,6 +55,12 @@ export type RuntimeEvent =
       channel: "text" | "reasoning" | "tool";
       phase: "start" | "delta" | "end";
       delta?: string;
+      /**
+       * 事件归一化时刻（epoch ms）。Pi 上游不带时间戳；由 normalizer 在产出
+       * 事件时打点。reasoning 通道据此推导每步耗时（落库 durationMs、wire 下
+       * 发 reasoning-timing），重放/断线续传时保留原始时刻。
+       */
+      at?: number;
     }
   | {
       type: "message.completed";

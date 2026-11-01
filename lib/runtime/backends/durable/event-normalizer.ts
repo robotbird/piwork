@@ -107,6 +107,7 @@ export class DurableEventNormalizer {
                   change.delta.length
               );
               events.push({
+                at: Date.now(),
                 channel,
                 contentIndex: change.contentIndex,
                 delta: change.delta,
@@ -155,6 +156,7 @@ export class DurableEventNormalizer {
           if (full.length > emitted) {
             this.emittedChars.set(contentIndex, full.length);
             events.push({
+              at: Date.now(),
               channel,
               contentIndex,
               delta: full.slice(emitted),
@@ -245,6 +247,7 @@ export class DurableEventNormalizer {
     this.openBlocks.set(contentIndex, channel);
     const events: RuntimeEvent[] = [
       {
+        at: Date.now(),
         channel,
         contentIndex,
         phase: "start",
@@ -255,6 +258,7 @@ export class DurableEventNormalizer {
     if (initial.length > 0) {
       this.emittedChars.set(contentIndex, initial.length);
       events.push({
+        at: Date.now(),
         channel,
         contentIndex,
         delta: initial,
@@ -283,6 +287,7 @@ export class DurableEventNormalizer {
       const emitted = this.emittedChars.get(contentIndex) ?? 0;
       if (full.length > emitted) {
         events.push({
+          at: Date.now(),
           channel,
           contentIndex,
           delta: full.slice(emitted),
@@ -294,6 +299,7 @@ export class DurableEventNormalizer {
     }
     this.openBlocks.delete(contentIndex);
     events.push({
+      at: Date.now(),
       channel,
       contentIndex,
       phase: "end",

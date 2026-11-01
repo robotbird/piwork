@@ -69,11 +69,23 @@ export type CustomUIDataTypes = {
   "delivered-file": DeliveredFileData;
   /** (runId, seq) 游标：transient 直传，客户端存内存 ref 供断线重连 */
   "runtime-cursor": RuntimeCursorData;
+  "reasoning-timing": ReasoningTimingData;
 };
 
 export type RuntimeCursorData = {
   runId: string;
   seq: number;
+};
+
+/**
+ * reasoning 块的服务端起止时刻（epoch ms，取自 message.delta 的 at）：
+ * transient 直传，客户端据此展示思考总耗时与每步耗时——断线重连/重放时
+ * 到达时刻失真，服务端时刻仍准确。
+ */
+export type ReasoningTimingData = {
+  id: string;
+  phase: "start" | "end";
+  at: number;
 };
 
 export type ChatMessage = UIMessage<

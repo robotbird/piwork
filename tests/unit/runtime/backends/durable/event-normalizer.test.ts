@@ -70,6 +70,33 @@ function outline(events: RuntimeEvent[]): string[] {
   );
 }
 
+test("message.delta 事件携带归一化时刻 at（epoch ms）", () => {
+  const normalizer = new DurableEventNormalizer();
+  const initial = normalizer.feed({
+    message: assistantMessage([
+      { thinking: "先想想", type: "thinking" },
+    ] as AssistantMessage["content"]),
+    type: "message_start",
+  });
+  const appended = normalizer.feed({
+    changes: [
+      { contentIndex: 0, delta: "更多", type: "thinking_delta" } as const,
+    ],
+    type: "message_update",
+    usage,
+  });
+  const deltas = [...initial, ...appended].filter(
+    (event): event is Extract<RuntimeEvent, { type: "message.delta" }> =>
+      event.type === "message.delta"
+  );
+  // message_start 的合成 start/delta + 新增 delta
+  assert.ok(deltas.length >= 3);
+  for (const delta of deltas) {
+    assert.equal(typeof delta.at, "number");
+    assert.ok((delta.at ?? 0) > 0);
+  }
+});
+
 test("delta for a block without start synthesizes start before the delta", () => {
   const normalizer = new DurableEventNormalizer();
   normalizer.feed({ message: assistantMessage([]), type: "message_start" });

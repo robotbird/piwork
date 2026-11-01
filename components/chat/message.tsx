@@ -24,6 +24,10 @@ import { useDataStream } from "./data-stream-provider";
 import { DocumentToolResult } from "./document";
 import { DocumentPreview } from "./document-preview";
 import { MessageActions } from "./message-actions";
+import {
+  MessageReasoning,
+  type ReasoningPartWithTiming,
+} from "./message-reasoning";
 import { PreviewAttachment } from "./preview-attachment";
 import { TextAttachmentPreview } from "./text-attachment-preview";
 import { UserAvatar } from "./user-avatar";
@@ -162,6 +166,21 @@ const PurePreviewMessage = ({
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
 
+  // 思考过程：reasoning part 不在 parts 循环里逐个渲染，聚合到消息顶部的
+  // 折叠面板（总用时 + 每步耗时）
+  const reasoningParts = isAssistant
+    ? (message.parts.filter(
+        (part) => part.type === "reasoning"
+      ) as ReasoningPartWithTiming[])
+    : [];
+  const reasoningPanel =
+    reasoningParts.length > 0 ? (
+      <MessageReasoning
+        key={`reasoning-${message.id}`}
+        parts={reasoningParts}
+      />
+    ) : null;
+
   const hasAnyContent = message.parts?.some(
     (part) =>
       (part.type === "text" && part.text?.trim().length > 0) ||
@@ -212,6 +231,7 @@ const PurePreviewMessage = ({
     const key = `message-${message.id}-part-${index}`;
 
     if (type === "reasoning") {
+      // 已由顶部 MessageReasoning 面板聚合展示
       return null;
     }
 
@@ -432,12 +452,13 @@ const PurePreviewMessage = ({
 
   const content = isThinking ? (
     <>
-      <WaitingText />
+      {reasoningPanel ?? <WaitingText />}
       <ToolStatusText />
     </>
   ) : (
     <>
       {attachments}
+      {reasoningPanel}
       {parts}
       {sources.length > 0 ? (
         <section
