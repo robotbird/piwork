@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
+import { desktopLoginReturn } from "@/lib/auth/desktop-login-return";
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -33,10 +34,18 @@ export async function proxy(request: NextRequest) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
-    return NextResponse.redirect(new URL(`${base}/login`, request.url));
+    const loginUrl = new URL(`${base}/login`, request.url);
+    const desktopReturn = desktopLoginReturn(pathname + request.nextUrl.search);
+    if (desktopReturn) {
+      loginUrl.searchParams.set("callbackUrl", desktopReturn);
+    }
+    return NextResponse.redirect(loginUrl);
   }
   if (authenticated && isAuthPage) {
-    return NextResponse.redirect(new URL(`${base}/`, request.url));
+    const target =
+      desktopLoginReturn(request.nextUrl.searchParams.get("callbackUrl")) ??
+      "/";
+    return NextResponse.redirect(new URL(`${base}${target}`, request.url));
   }
 
   return NextResponse.next();

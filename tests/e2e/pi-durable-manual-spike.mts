@@ -1,6 +1,6 @@
 /**
  * pi-durable 手动验证 spike —— docs/research/pi-durable-evaluation.md §3 的可重放版。
- * 对象：仓库已安装的 @earendil-works/pi-durable（当前 1.0.2，五包对齐；faux provider，无网络依赖）。
+ * 对象：仓库已安装的 @earendil-works/pi-durable（1.5.0；faux provider，无网络依赖）。
  *
  * 运行（仓库根目录）：
  *   pnpm exec tsx tests/e2e/pi-durable-manual-spike.mts all    # 全部用例
@@ -11,14 +11,9 @@
  *   T2 SQLite 持久化 + 重开延续（close → reopen → 同一会话续问）
  *   T3 恰好一次（同 requestId 重复提交去重）
  *   T4 崩溃恢复 + replay 双重门（kill -9 后 resume；unsafe 工具被 interrupted 拦下）
- *   T5 事件流（watchEvents 快照 + 增量；晚订阅不重放历史派生事件）
+ *   T5 会话视图（原子快照、提交更新与晚订阅）
  *   T6 双进程单写者（行为观察项：README 声明无跨进程锁）
  *
- * 验证 pi-durable 1.0.2（不动机器内仓库依赖）：
- *   mkdir /tmp/pidurable102 && cd /tmp/pidurable102 && npm init -y
- *   npm install $(npm pack @earendil-works/pi-durable@1.0.2 @earendil-works/pi-ai@1.0.2 @earendil-works/chord@1.0.2 | tr '\n' ' ')
- *   cp <repo>/tests/e2e/pi-durable-manual-spike.mts spike.mts
- *   npx tsx spike.mts all
  */
 import { spawn } from "node:child_process";
 import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -30,17 +25,17 @@ import {
   createModels,
   fauxAssistantMessage,
   fauxToolCall,
-  Type,
 } from "@earendil-works/pi-ai";
 import { fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import {
+  type ConversationId,
   createRegistry,
   defineExtension,
   Harness,
   MemoryStorage,
-  watchEvents,
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { obj } from "@earendil-works/pi-schema";
 
 const scriptPath = fileURLToPath(import.meta.url);
 /** 仓库根（脚本位于 <repo>/scripts/ 下） */
@@ -167,7 +162,7 @@ async function t1(): Promise<void> {
 async function t2(root: string): Promise<void> {
   console.log("\nT2 SQLite 持久化：close → 重开 → 同一会话续问");
   const db = path.join(root, "t2.sqlite");
-  let conversationId = "";
+  let conversationId: ConversationId | undefined;
   {
     const storage = await openNodeSqliteStorage(db);
     const deps = makeDeps([fauxAssistantMessage("第一轮：SQLite 持久化内容")]);
@@ -249,7 +244,7 @@ function t4Tools(effectsPath: string) {
         return { content: [{ text: "pre-ok", type: "text" }] };
       },
       name: "pre_safe",
-      parameters: Type.Object({}),
+      parameters: obj({}),
       replay: "safe" as const,
     },
     {
@@ -261,7 +256,7 @@ function t4Tools(effectsPath: string) {
         return { content: [{ text: "slow-ok", type: "text" }] };
       },
       name: "slow_unsafe",
-      parameters: Type.Object({}),
+      parameters: obj({}),
       replay: "unsafe" as const,
     },
   ];
@@ -286,19 +281,13 @@ async function t4Child(root: string): Promise<void> {
   const harness = await Harness.open(storage, harnessOptions(deps), CTX);
   const conv = await harness.root(CTX);
   await conv.configure(modelOf(deps), CTX);
-  const trace = await watchEvents(harness, conv.id, CTX);
-  await trace.start(
-    // biome-ignore lint/suspicious/useAwait: 官方 listener 契约要求 Promise 返回，此处纯同步收集
-    async (events) => {
-      for (const event of events) {
-        const detail =
-          event.type === "message_end" || event.type === "message_start"
-            ? ` ${JSON.stringify((event as { message?: unknown }).message)?.slice(0, 200)}`
-            : "";
-        console.error(`[child] ${event.type}${detail}`);
-      }
+  const trace = await conv.watch(CTX);
+  // biome-ignore lint/suspicious/useAwait: Pi requires Promise-returning watch listeners.
+  await trace.start(async (call) => {
+    if (call.kind === "value") {
+      console.error(`[child] ${JSON.stringify(call.value.docs["pi.live"])}`);
     }
-  );
+  });
   await conv.submit(
     { content: "T4 依次调用 pre_safe 和 slow_unsafe", type: "input" },
     CTX
@@ -376,7 +365,9 @@ async function t4(): Promise<void> {
 // ---------- T5 事件流 ----------
 
 async function t5(): Promise<void> {
-  console.log("\nT5 事件流：watchEvents 快照 + 增量 + 晚订阅");
+  console.log(
+    "\nT5 conversation views: snapshots, updates and late subscriptions"
+  );
   const deps = makeDeps([fauxAssistantMessage("T5 事件流回复")]);
   const harness = await Harness.open(
     new MemoryStorage(),
@@ -385,45 +376,40 @@ async function t5(): Promise<void> {
   );
   const conv = await harness.root(CTX);
   await conv.configure(modelOf(deps), CTX);
-
-  const types: string[] = [];
-  const stream = await watchEvents(harness, conv.id, CTX);
-  await stream.start(
-    // biome-ignore lint/suspicious/useAwait: 官方 listener 契约要求 Promise 返回，此处纯同步收集
-    async (batch) => {
-      for (const event of batch) {
-        types.push(event.type);
-      }
+  const stream = await conv.watch(CTX);
+  const updates: string[] = [];
+  // biome-ignore lint/suspicious/useAwait: Pi requires Promise-returning watch listeners.
+  await stream.start(async (call) => {
+    if (call.kind === "value") {
+      updates.push(JSON.stringify(call.value));
     }
-  );
-  ok(stream.snapshot !== undefined, "T5 附加时拿到原子快照句柄");
+  });
+  ok(stream.value !== undefined, "T5 atomic initial view");
   await (
     await conv.submit({ content: "T5 触发一轮", type: "input" }, CTX)
   ).wait(CTX);
-  await stream.stop();
-  const unique = [...new Set(types)];
-  console.log(`  事件类型：${unique.join(", ")}`);
-  ok(types.includes("run_end"), "T5 收到 run_end 终态事件");
-
-  // 晚订阅：快照来自句柄属性；增量流只推后续提交，不重放历史派生事件
-  const lateTypes: string[] = [];
-  const late = await watchEvents(harness, conv.id, CTX);
-  await late.start(
-    // biome-ignore lint/suspicious/useAwait: 官方 listener 契约要求 Promise 返回，此处纯同步收集
-    async (batch) => {
-      for (const event of batch) {
-        lateTypes.push(event.type);
-      }
-    }
+  await waitFor(
+    () => updates.some((value) => value.includes("T5 事件流回复")),
+    5000,
+    "T5 committed answer"
   );
+  await stream.stop();
+  ok(updates.length > 0, "T5 receives committed views");
+  const late = await conv.watch(CTX);
+  ok(
+    JSON.stringify(late.value).includes("T5 触发一轮"),
+    "T5 late view contains history"
+  );
+  const lateUpdates: string[] = [];
+  // biome-ignore lint/suspicious/useAwait: Pi requires Promise-returning watch listeners.
+  await late.start(async (call) => {
+    if (call.kind === "value") {
+      lateUpdates.push(JSON.stringify(call.value));
+    }
+  });
   await sleep(500);
   await late.stop();
-  const lateBody = JSON.stringify(late.snapshot);
-  ok(
-    late.snapshot !== undefined && lateBody.includes("T5 触发一轮"),
-    "T5 晚订阅快照携带完整历史（含提交前消息）"
-  );
-  ok(!lateTypes.includes("message_start"), "T5 晚订阅未重放历史派生事件");
+  ok(lateUpdates.length === 0, "T5 does not replay historical updates");
   await harness.close(CTX);
 }
 
@@ -513,7 +499,7 @@ async function main(): Promise<void> {
     return t6Holder(db);
   }
   console.log(
-    "pi-durable 手动验证 spike（@earendil-works/pi-durable@0.99.2 安装版，faux provider）"
+    "pi-durable 手动验证 spike（@earendil-works/pi-durable@1.5.0 安装版，faux provider）"
   );
   const tempRoots: string[] = [];
   const newRoot = async () => {

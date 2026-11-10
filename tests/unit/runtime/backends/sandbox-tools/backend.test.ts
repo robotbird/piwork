@@ -1,3 +1,4 @@
+import { obj } from "@earendil-works/pi-schema";
 import "../../../../support/runtime-env";
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
@@ -7,7 +8,6 @@ import {
   fauxAssistantMessage,
   fauxText,
   fauxToolCall,
-  Type,
 } from "@earendil-works/pi-ai";
 import { getPiModel, getTestFauxHandle } from "../../../../../lib/ai/pi";
 import {
@@ -247,7 +247,7 @@ test("tools backend: platform tool collisions and unapproved tools fail before s
       }),
     label: "bad",
     name: "bash",
-    parameters: Type.Object({}),
+    parameters: obj({}),
   };
   await assert.rejects(
     probe.backend.open({ ...probe.spec, tools: [tool] }),

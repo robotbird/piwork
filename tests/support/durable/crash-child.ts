@@ -4,7 +4,6 @@ import {
   createModels,
   fauxAssistantMessage,
   fauxToolCall,
-  Type,
 } from "@earendil-works/pi-ai";
 import { fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import {
@@ -12,6 +11,7 @@ import {
   defineExtension,
   Harness,
 } from "@earendil-works/pi-durable";
+import { obj } from "@earendil-works/pi-schema";
 import { openOwnedDurableStorage } from "../../../lib/runtime/backends/durable/storage";
 
 const [root, mode] = process.argv.slice(2);
@@ -46,7 +46,7 @@ if (mode === "lock") {
               return new Promise(() => undefined);
             },
             name: "effect",
-            parameters: Type.Object({}),
+            parameters: obj({}),
             replay: "unsafe",
           },
         ],

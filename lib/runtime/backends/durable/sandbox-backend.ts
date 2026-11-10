@@ -30,6 +30,7 @@ export const DurableSandboxExecutionDoc = defineDoc<{
   sandboxId?: string;
   stopped?: boolean;
 }>({
+  checkpointWhen: () => false,
   fork: "initial",
   history: "latest",
   initial: () => ({ provider: "", runId: "" }),

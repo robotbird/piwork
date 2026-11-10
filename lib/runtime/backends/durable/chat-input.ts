@@ -34,7 +34,7 @@ export function hashDurableChatInput(
       systemPrompt: spec.systemPrompt,
       tools: ["read", "write", "edit", "bash", "deliver_file"],
       ttlSeconds: 600,
-      version: "durable-chat-v1/pi-1.3.0",
+      version: "durable-chat-v1/pi-1.5.0",
       workspace: "ephemeral",
     })
   );

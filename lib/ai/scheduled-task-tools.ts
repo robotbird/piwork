@@ -1,5 +1,5 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { Type } from "@earendil-works/pi-ai";
+import { obj, str } from "@earendil-works/pi-schema";
 import { type TaskInput, taskInputSchema } from "@/lib/scheduler/validation";
 
 export const schedulingPrompt =
@@ -21,19 +21,19 @@ export function createScheduledTaskTool(
     },
     label: "创建定时任务",
     name: "create_scheduled_task",
-    parameters: Type.Object({
-      prompt: Type.String({
+    parameters: obj({
+      prompt: str({
         description: "Self-contained instructions to execute each time",
         maxLength: 10_000,
         minLength: 1,
       }),
-      schedule: Type.Object({
-        cron: Type.String({ description: "Five-field cron, e.g. 0 9 * * 1-5" }),
-        timezone: Type.String({
+      schedule: obj({
+        cron: str({ description: "Five-field cron, e.g. 0 9 * * 1-5" }),
+        timezone: str({
           description: "IANA timezone, default Asia/Shanghai",
         }),
       }),
-      taskType: Type.String({
+      taskType: str({
         description: "Short user-facing task title",
         maxLength: 64,
         minLength: 1,

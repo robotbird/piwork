@@ -24,16 +24,17 @@ import {
   createModels,
   fauxAssistantMessage,
   fauxToolCall,
-  Type,
 } from "@earendil-works/pi-ai";
 import { fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import {
+  type ConversationView,
   createRegistry,
   defineExtension,
   Harness,
-  watchEvents,
+  type LiveState,
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { num, obj, str } from "@earendil-works/pi-schema";
 
 const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const dir = path.join(repoRoot, ".piwork/durable-demo");
@@ -133,7 +134,7 @@ function demoTools() {
         return { content: [{ text: "已记录", type: "text" }] };
       },
       name: "note",
-      parameters: Type.Object({ text: Type.String() }),
+      parameters: obj({ text: str() }),
       replay: "safe" as const,
     },
     {
@@ -146,7 +147,7 @@ function demoTools() {
         };
       },
       name: "slow_note",
-      parameters: Type.Object({ seconds: Type.Number(), text: Type.String() }),
+      parameters: obj({ seconds: num(), text: str() }),
       replay: "safe" as const,
     },
     {
@@ -159,7 +160,7 @@ function demoTools() {
         };
       },
       name: "slow_task",
-      parameters: Type.Object({ seconds: Type.Number() }),
+      parameters: obj({ seconds: num() }),
       replay: "unsafe" as const,
     },
   ];
@@ -181,66 +182,36 @@ function textOfMessage(message: unknown): string {
   return "";
 }
 
-function printEvent(event: { type: string; [key: string]: unknown }): void {
-  switch (event.type) {
-    case "tool_execution_start":
-      console.log(
-        `  🔧 ${event.toolName}(${JSON.stringify(event.args ?? {}).slice(0, 80)}) 执行中…`
-      );
-      break;
-    case "tool_execution_end": {
-      const entry = event.entry as
-        | { model?: [{ role?: string; isError?: boolean; content?: unknown }] }
-        | undefined;
-      const result = entry?.model?.[0];
-      const failed = result?.isError === true;
-      const text = textOfMessage(result).slice(0, 120);
-      console.log(
-        `  ${failed ? "⚠️" : "✔"} ${event.toolName} 结束${failed ? "（错误结果，可能为恢复中断 interrupted）" : ""}${text ? `：${text}` : ""}`
-      );
-      break;
+function createViewPrinter(initial: ConversationView) {
+  let lastEntry = initial.entries.at(-1)?.id;
+  const started = new Set<string>();
+  return (view: ConversationView): void => {
+    const live = (view.docs["pi.live"] ?? {}) as LiveState;
+    for (const slot of live.tools ?? []) {
+      if (slot.status === "running" && !started.has(slot.callId)) {
+        started.add(slot.callId);
+        console.log(`  🔧 ${slot.name} 执行中…`);
+      }
     }
-    case "message_start": {
-      const role = (event.message as { role?: string } | undefined)?.role;
-      if (role === "assistant") {
-        console.log("🤖 回复中…");
+    for (const entry of view.entries) {
+      if (lastEntry !== undefined && entry.id <= lastEntry) {
+        continue;
       }
-      break;
-    }
-    case "message_end": {
-      if (process.env.PIWORK_DEMO_DEBUG) {
-        console.log(
-          `  🔍 ${event.type}: ${JSON.stringify(event).slice(0, 220)}`
-        );
-      }
-      const entry = event.entry as
-        | { model?: [{ role?: string; content?: unknown }] }
-        | undefined;
-      const message = entry?.model?.[0];
-      if (message?.role !== "assistant") {
-        break;
-      }
-      const calls = (
-        message.content as { type: string; name?: string }[] | undefined
-      )?.filter((part) => part.type === "toolCall");
-      if (calls && calls.length > 0) {
-        console.log(
-          `  → 请求工具：${calls.map((call) => call.name).join(", ")}`
-        );
-      } else {
-        const text = textOfMessage(message).trim();
-        if (text) {
-          console.log(`🤖 ${text}`);
+      lastEntry = entry.id;
+      for (const message of entry.model ?? []) {
+        if (message.role === "assistant") {
+          const text = textOfMessage(message).trim();
+          if (text) {
+            console.log(`🤖 ${text}`);
+          }
+        } else if (message.role === "toolResult") {
+          console.log(
+            `  ${message.isError ? "⚠️" : "✔"} ${message.toolName}：${textOfMessage(message).slice(0, 120)}`
+          );
         }
       }
-      break;
     }
-    case "run_end":
-      console.log("── 回合结束\n");
-      break;
-    default:
-      break;
-  }
+  };
 }
 
 // ---------- 主程序 ----------
@@ -274,7 +245,7 @@ async function main(): Promise<void> {
 
   const view = await conv.context(CTX);
   const roles = view.entries
-    .map((entry) => (entry as { model?: [{ role?: string }] }).model?.[0]?.role)
+    .map((entry) => entry.model?.[0]?.role)
     .filter(Boolean);
   console.log("═══ pi-durable 交互演示 ═══");
   console.log(`存储：${path.relative(repoRoot, db)}（SQLite，跨重启）`);
@@ -287,20 +258,20 @@ async function main(): Promise<void> {
   console.log("试试：慢任务 30 · 慢记「要点」30 · 记「abc」\n");
 
   let runInFlight = false;
-  let resolveRun: (() => void) | undefined;
-  const stream = await watchEvents(harness, conv.id, CTX);
-  await stream.start(async (events) => {
-    for (const event of events) {
-      if (event.type === "run_start") {
-        runInFlight = true;
-      }
-      if (event.type === "run_end") {
-        runInFlight = false;
-        resolveRun?.();
-        resolveRun = undefined;
-      }
-      // biome-ignore lint/performance/noAwaitInLoops: 事件必须按到达顺序串行打印
-      await printEvent(event);
+  const stream = await conv.watch(CTX);
+  const printView = createViewPrinter(stream.value);
+  // biome-ignore lint/suspicious/useAwait: Pi requires Promise-returning watch listeners.
+  await stream.start(async (call) => {
+    if (call.kind !== "value") {
+      return;
+    }
+    printView(call.value);
+    const live = (call.value.docs["pi.live"] ?? {}) as LiveState;
+    if (runInFlight && live.run === undefined) {
+      runInFlight = false;
+      console.log("── 回合结束\n");
+    } else if (live.run !== undefined) {
+      runInFlight = true;
     }
   });
 
@@ -387,14 +358,12 @@ async function main(): Promise<void> {
       console.log("当前回合仍在进行，请稍候（或等工具结束后再输入）");
       continue;
     }
-    const turned = new Promise<void>((resolve) => {
-      resolveRun = resolve;
-    });
     if (process.env.PIWORK_DEMO_DEBUG) {
       console.log(`  🔍 提交: ${line.slice(0, 40)}`);
     }
-    await conv.submit({ content: line, type: "input" }, CTX);
-    await turned;
+    runInFlight = true;
+    await (await conv.submit({ content: line, type: "input" }, CTX)).wait(CTX);
+    runInFlight = false;
   }
 }
 

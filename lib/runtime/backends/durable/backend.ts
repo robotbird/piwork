@@ -15,7 +15,6 @@ import {
   section,
   type ToolRegistration,
   UserEntry,
-  watchEvents,
 } from "@earendil-works/pi-durable";
 import { getActivePiProviders } from "@/lib/ai/pi";
 import type {
@@ -260,28 +259,22 @@ export class DurableBackend implements RuntimeBackend {
         execution,
         spec.runId
       );
-      // 事件流自 open() 起挂接；队列同样自 open() 起缓冲，观察窗口不小于现状
-      const stream = await watchEvents(
-        harness,
-        conversation.id,
-        BACKGROUND_CONTEXT
-      );
-      stream.start(async (events) => {
-        for (const event of events) {
-          for (const normalized of session.consume(event)) {
-            session.pushEvent(normalized);
-          }
-          if (event.type === "run_end") {
-            // biome-ignore lint/performance/noAwaitInLoops: preserve committed event/terminal order
-            await session.emitTerminal();
-          }
+      const stream = await conversation.watch(BACKGROUND_CONTEXT);
+      session.initializeView(stream.value);
+      stream.start(async (call) => {
+        if (call.kind !== "value") {
+          return;
+        }
+        for (const normalized of session.consume(call.value)) {
+          session.pushEvent(normalized);
+        }
+        if (session.runEnded) {
+          await session.emitTerminal();
         }
       });
-      // Pi 1.2 closes the Session/watch after a storage failure, without run_end.
-      // Stop managed execution before publishing failure; never retry effects.
       stream.closed
         .then(async (end) => {
-          if (end.reason === "session_failed") {
+          if (end.kind === "failed") {
             await session.failSession(end.error);
           }
         })
@@ -351,6 +344,16 @@ class DurableRuntimeSession implements RuntimeSession, StreamSink {
 
   attachWatchStop(stop: () => Promise<void>): void {
     this.unsubscribeWatch = stop;
+  }
+
+  initializeView(
+    view: Parameters<DurableEventNormalizer["initialize"]>[0]
+  ): void {
+    this.normalizer.initialize(view);
+  }
+
+  get runEnded(): boolean {
+    return this.normalizer.runEnded;
   }
 
   consume(

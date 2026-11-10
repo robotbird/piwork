@@ -1,5 +1,5 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { Type } from "@earendil-works/pi-ai";
+import { int, lit, obj, opt, str, union } from "@earendil-works/pi-schema";
 import {
   type SearchInput,
   type SearchResponse,
@@ -39,27 +39,20 @@ export function createWebSearchTool(
     },
     label: "联网搜索",
     name: WEB_SEARCH_TOOL,
-    parameters: Type.Object(
+    parameters: obj(
       {
-        limit: Type.Optional(
-          Type.Integer({ default: 5, maximum: 8, minimum: 1 })
-        ),
-        query: Type.String({
+        limit: opt(int({ default: 5, maximum: 8, minimum: 1 })),
+        query: str({
           description:
             "Minimal public search keywords; exclude secrets and sensitive private data",
           maxLength: 500,
           minLength: 1,
         }),
-        recency: Type.Optional(
-          Type.Union([
-            Type.Literal("day"),
-            Type.Literal("week"),
-            Type.Literal("month"),
-            Type.Literal("year"),
-          ])
+        recency: opt(
+          union([lit("day"), lit("week"), lit("month"), lit("year")])
         ),
       },
-      { additionalProperties: false }
+      { open: false }
     ),
   };
 }

@@ -229,6 +229,8 @@
     "runtimeAndSecurity": "Runtime and environment"
   },
   "modelPlugins": {
+    "credentialsUnreadable": "Credentials unavailable",
+    "credentialsUnreadableHint": "The saved credentials cannot be decrypted in this environment. Re-enter all credential fields and save after validation.",
     "credentialsEncrypted": "Credentials are validated server-side and stored encrypted.",
     "installProviderTitle": "Install model provider",
     "installDescription": "Installation inspects and rebuilds the plugin from source. Configure and validate the API key after installation; the endpoint and model catalog come from the plugin.",
@@ -970,6 +972,7 @@
     "theLastEnabledAdministratorCannotBeDisabled": "The last enabled administrator cannot be disabled"
   },
   "chat": {
+    "desktopSyncNotice": "This conversation was synced from desktop. Local files, attachments, skills, and MCP settings are not automatically available on Web.",
     "failedExecuteAction": "Failed to execute action",
     "sharedFilesUnsupported": "Viewing files in shared chats is currently not supported.",
     "noTextToCopy": "There's no text to copy!",
@@ -1414,6 +1417,7 @@
     "stepsLabel": "Thinking steps"
   },
   "adminApi": {
+    "credentialRecoveryRequired": "The existing credentials cannot be decrypted. Re-enter all credential fields before saving.",
     "operationFailed": "Operation failed",
     "overviewLoadFailed": "Failed to load overview data. Please try again later.",
     "sandboxInvalidProvider": "Invalid sandbox provider",
@@ -1983,5 +1987,17 @@
     "previous": "Previous",
     "next": "Next",
     "page": "Page {page} of {pages}"
+  },
+  "desktopLogin": {
+    "title": "Sign in to PiWork desktop",
+    "description": "Use your current website account to sign in to the desktop app.",
+    "authorize": "Sign in and open PiWork",
+    "connecting": "Connecting…",
+    "readyTitle": "Return to PiWork to finish signing in",
+    "readyDescription": "Allow your browser to open PiWork. The app will update your account automatically. Generate a new link if it has expired.",
+    "openClient": "Open PiWork desktop",
+    "retry": "Generate a new sign-in link",
+    "invalid": "This sign-in link is invalid. Start again from PiWork desktop.",
+    "error": "Authorization failed. Try again or start sign-in from the desktop app."
   }
 }

@@ -821,3 +821,46 @@ export const libraryItem = pgTable(
     uniqueIndex("LibraryItem_user_url_idx").on(table.userId, table.url),
   ]
 );
+
+/** Account-scoped usage for inference performed by local desktop agents. */
+export const desktopInferenceUsage = pgTable(
+  "DesktopInferenceUsage",
+  {
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    id: uuid("id").primaryKey().notNull().defaultRandom(),
+    inputTokens: integer("inputTokens"),
+    outputTokens: integer("outputTokens"),
+    runId: uuid("runId").notNull(),
+    totalTokens: integer("totalTokens"),
+    userId: uuid("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+  },
+  (table) => ({
+    userCreatedIdx: index("DesktopInferenceUsage_user_created_idx").on(
+      table.userId,
+      table.createdAt
+    ),
+  })
+);
+
+/** Ownership and run coordination for a desktop-origin synchronized conversation. */
+export const desktopSyncState = pgTable("DesktopSyncState", {
+  activeBy: varchar("activeBy", { enum: ["desktop", "web"] }),
+  chatId: uuid("chatId")
+    .primaryKey()
+    .notNull()
+    .references(() => chat.id, { onDelete: "cascade" }),
+  leaseToken: uuid("leaseToken"),
+  updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+});
+
+/** Short-lived, PKCE-bound grants; only hashes of authorization codes are stored. */
+export const desktopLoginGrant = pgTable("DesktopLoginGrant", {
+  codeHash: varchar("codeHash", { length: 43 }).primaryKey(),
+  challenge: varchar("challenge", { length: 43 }).notNull(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  userId: uuid("userId")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+});

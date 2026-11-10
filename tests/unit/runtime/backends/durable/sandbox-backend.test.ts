@@ -1,3 +1,4 @@
+import { obj } from "@earendil-works/pi-schema";
 import "../../../../support/runtime-env";
 import assert from "node:assert/strict";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
@@ -10,7 +11,6 @@ import {
   type FauxResponseStep,
   fauxAssistantMessage,
   fauxToolCall,
-  Type,
 } from "@earendil-works/pi-ai";
 import { createRegistry, Harness } from "@earendil-works/pi-durable";
 import { getPiModel, getTestFauxHandle } from "../../../../../lib/ai/pi";
@@ -321,7 +321,7 @@ test("durable sandbox: allocation/tool/OpenSandbox/production gates fail closed"
           execute: async () => ({ content: [], details: undefined }),
           label: "bad",
           name: "bash",
-          parameters: Type.Object({}),
+          parameters: obj({}),
         },
       ],
     }),

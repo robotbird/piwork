@@ -35,7 +35,13 @@ import {
   publishChatMessage,
   publishChatRun,
 } from "@/lib/collab/chat-event-hub";
+import { getActiveRunByChatId } from "@/lib/db/agent-run-queries";
 import { getChatAccess } from "@/lib/db/chat-share-queries";
+import {
+  acquireWebLeaseIfSynced,
+  DesktopSyncConflict,
+  releaseDesktopSyncLease,
+} from "@/lib/db/desktop-sync-queries";
 import { canReadStoredFile } from "@/lib/db/library-queries";
 import { listMcpServers } from "@/lib/db/mcp-server-queries";
 import { listPiPackages } from "@/lib/db/pi-package-queries";
@@ -98,6 +104,21 @@ export async function POST(request: Request) {
   const t = await getTranslations("api");
   const tRuntime = await getTranslations();
   let requestBody: PostRequestBody;
+  let syncLease: { chatId: string; userId: string; token: string } | null =
+    null;
+  let streamOwnsLease = false;
+  const releaseSyncLease = async () => {
+    if (!syncLease) {
+      return;
+    }
+    const lease = syncLease;
+    syncLease = null;
+    try {
+      await releaseDesktopSyncLease({ ...lease, side: "web" });
+    } catch {
+      console.error("[desktop-sync] Unable to release Web run lease");
+    }
+  };
 
   try {
     const json = await request.json();
@@ -190,6 +211,19 @@ export async function POST(request: Request) {
         return new ChatbotError("forbidden:chat").toResponse();
       }
       isChatOwner = access.isOwner;
+      if (process.env.PIWORK_DESKTOP_SYNC_ENABLED === "1") {
+        try {
+          const token = await acquireWebLeaseIfSynced(id, chat.userId);
+          if (token) {
+            syncLease = { chatId: id, token, userId: chat.userId };
+          }
+        } catch (error) {
+          if (error instanceof DesktopSyncConflict) {
+            return new ChatbotError("conflict:chat").toResponse();
+          }
+          throw error;
+        }
+      }
       messagesFromDb = await getMessagesByChatId({ id });
       // 项目聊天在发起页已预建（标题为占位）：首条用户消息发出后生成标题
       if (
@@ -606,168 +640,189 @@ export async function POST(request: Request) {
     };
     const stream = createUIMessageStream({
       execute: async ({ writer: dataStream }) => {
-        const modelName = modelConfig?.name ?? chatModel;
-        let hasModelActivity = false;
-        let healthCheckTimer: ReturnType<typeof setTimeout> | undefined;
-
-        const clearHealthCheckTimer = () => {
-          if (healthCheckTimer) {
-            clearTimeout(healthCheckTimer);
-          }
-        };
-
-        const writeWaitingStatus = (
-          phase: WaitingStatusData["phase"],
-          messageText: string
-        ) => {
-          if (hasModelActivity && phase !== "thinking") {
-            return;
-          }
-          dataStream.write({
-            data: {
-              message: messageText,
-              modelId: chatModel,
-              modelName,
-              phase,
-            },
-            transient: true,
-            type: "data-waiting-status",
-          });
-        };
-
-        writeWaitingStatus("waiting", "Waiting...");
-
-        healthCheckTimer = setTimeout(() => {
-          Promise.resolve(getModelAvailability(chatModel))
-            .then((availability) => {
-              if (availability === "impacted") {
-                writeWaitingStatus(
-                  "health",
-                  `${modelName} may be slow or unavailable right now...`
-                );
-              } else {
-                writeWaitingStatus("still-waiting", "Still waiting...");
-              }
-            })
-            .catch(() => {
-              writeWaitingStatus("still-waiting", "Still waiting...");
-            });
-        }, HEALTH_CHECK_DELAY_MS);
-
-        const markModelActive = () => {
-          if (hasModelActivity) {
-            return;
-          }
-          hasModelActivity = true;
-          clearHealthCheckTimer();
-          writeWaitingStatus("thinking", "Thinking...");
-        };
-
-        const stopWaitingStatus = () => {
-          hasModelActivity = true;
-          clearHealthCheckTimer();
-        };
-
-        // RunManager（v2.0 Step 2）：run 生命周期独立于本请求——start 落
-        // AgentRun/lease 并启动唯一消费循环，route 只 attach 订阅；断线仅
-        // detach（run 进程内继续），消息在终态由 RunManager 幂等 upsert。
-        let subscription: RunSubscription | undefined;
+        let leaseTransferred = false;
         try {
-          const run = await getRunManager().start({
-            baseAssistantMessageId,
-            baseParts,
-            prompt: runtimePrompt,
-            spec: {
-              ...(projectSources ? { projectSources } : {}),
-              lane: routing.lane,
-              ...(isDurable
-                ? {
-                    durableChat: {
-                      attachments: durableTurn?.attachments ?? [],
-                      catalogModelId: chatModel,
-                      promptHash: hashDurablePrompt(runtimePrompt),
-                      userId: session.user.id,
-                    },
-                  }
-                : {}),
-              appendSystemPrompt: isDurable
-                ? [executionPrompt]
-                : [
-                    buildSkillsSystemPrompt(skills),
-                    schedulingPrompt + new Date().toISOString(),
-                    ...(platformWebSearch && !workspaceDir
-                      ? [webSearchPrompt + new Date().toISOString()]
-                      : []),
-                    ...(executionPrompt ? [executionPrompt] : []),
-                  ],
-              chatId: id,
-              historyMessages,
-              model: piModel,
-              skills: isDurable ? [] : skills,
-              systemPrompt: baseSystemPrompt,
-              tools: isDurable
-                ? []
-                : [
-                    ...createSkillTools(skills),
-                    ...(platformWebSearch && !workspaceDir
-                      ? chatWebSearchTools({
-                          chatId: id,
-                          model: piModel,
-                          userId: session.user.id,
-                        })
-                      : []),
-                    ...scheduledTaskTools(
-                      session.user.id,
-                      currentUserMessage.id
-                    ),
-                  ],
-              workspaceDir,
-            },
-            userId: session.user.id,
-          });
+          const modelName = modelConfig?.name ?? chatModel;
+          let hasModelActivity = false;
+          let healthCheckTimer: ReturnType<typeof setTimeout> | undefined;
 
-          const attached = run.attach();
-          if (!attached) {
-            // start 返回后 LiveRun 必在，仅防御性兜底
-            throw new Error("run detached before attach");
-          }
-          subscription = attached;
-          // 协作实时：run 已启动且本请求成功 attach，通知房间其他成员
-          // resumeStream attach 活跃 run（与断线重连同一重放/活流 tail）。
-          publishChatRun({
-            actorId: session.user.id,
-            chatId: id,
-            phase: "started",
-          });
-          // 显式 start：客户端/DB/重放共用同一确定性消息 id（§2.5）
-          dataStream.write({ messageId: attached.messageId, type: "start" });
+          const clearHealthCheckTimer = () => {
+            if (healthCheckTimer) {
+              clearTimeout(healthCheckTimer);
+            }
+          };
 
-          const detach = () => subscription?.close();
-          request.signal.addEventListener("abort", detach, { once: true });
-          try {
-            await pumpRunSubscription(dataStream, subscription, {
-              // 任意内容块事件即视为模型活跃(含 tool 通道,与原事件桥一致)
-              onEvent: (event) => {
-                if (event.type === "message.delta") {
-                  markModelActive();
-                }
+          const writeWaitingStatus = (
+            phase: WaitingStatusData["phase"],
+            messageText: string
+          ) => {
+            if (hasModelActivity && phase !== "thinking") {
+              return;
+            }
+            dataStream.write({
+              data: {
+                message: messageText,
+                modelId: chatModel,
+                modelName,
+                phase,
               },
+              transient: true,
+              type: "data-waiting-status",
             });
+          };
+
+          writeWaitingStatus("waiting", "Waiting...");
+
+          healthCheckTimer = setTimeout(() => {
+            Promise.resolve(getModelAvailability(chatModel))
+              .then((availability) => {
+                if (availability === "impacted") {
+                  writeWaitingStatus(
+                    "health",
+                    `${modelName} may be slow or unavailable right now...`
+                  );
+                } else {
+                  writeWaitingStatus("still-waiting", "Still waiting...");
+                }
+              })
+              .catch(() => {
+                writeWaitingStatus("still-waiting", "Still waiting...");
+              });
+          }, HEALTH_CHECK_DELAY_MS);
+
+          const markModelActive = () => {
+            if (hasModelActivity) {
+              return;
+            }
+            hasModelActivity = true;
+            clearHealthCheckTimer();
+            writeWaitingStatus("thinking", "Thinking...");
+          };
+
+          const stopWaitingStatus = () => {
+            hasModelActivity = true;
+            clearHealthCheckTimer();
+          };
+
+          // RunManager（v2.0 Step 2）：run 生命周期独立于本请求——start 落
+          // AgentRun/lease 并启动唯一消费循环，route 只 attach 订阅；断线仅
+          // detach（run 进程内继续），消息在终态由 RunManager 幂等 upsert。
+          let subscription: RunSubscription | undefined;
+          try {
+            const run = await getRunManager().start({
+              baseAssistantMessageId,
+              baseParts,
+              prompt: runtimePrompt,
+              spec: {
+                ...(projectSources ? { projectSources } : {}),
+                lane: routing.lane,
+                ...(isDurable
+                  ? {
+                      durableChat: {
+                        attachments: durableTurn?.attachments ?? [],
+                        catalogModelId: chatModel,
+                        promptHash: hashDurablePrompt(runtimePrompt),
+                        userId: session.user.id,
+                      },
+                    }
+                  : {}),
+                appendSystemPrompt: isDurable
+                  ? [executionPrompt]
+                  : [
+                      buildSkillsSystemPrompt(skills),
+                      schedulingPrompt + new Date().toISOString(),
+                      ...(platformWebSearch && !workspaceDir
+                        ? [webSearchPrompt + new Date().toISOString()]
+                        : []),
+                      ...(executionPrompt ? [executionPrompt] : []),
+                    ],
+                chatId: id,
+                historyMessages,
+                model: piModel,
+                skills: isDurable ? [] : skills,
+                systemPrompt: baseSystemPrompt,
+                tools: isDurable
+                  ? []
+                  : [
+                      ...createSkillTools(skills),
+                      ...(platformWebSearch && !workspaceDir
+                        ? chatWebSearchTools({
+                            chatId: id,
+                            model: piModel,
+                            userId: session.user.id,
+                          })
+                        : []),
+                      ...scheduledTaskTools(
+                        session.user.id,
+                        currentUserMessage.id
+                      ),
+                    ],
+                workspaceDir,
+              },
+              userId: session.user.id,
+            });
+
+            const attached = run.attach();
+            if (!attached) {
+              // start 返回后 LiveRun 必在，仅防御性兜底
+              throw new Error("run detached before attach");
+            }
+            subscription = attached;
+            if (syncLease) {
+              leaseTransferred = true;
+              attached.settled
+                .then(async () => {
+                  if (!(await getActiveRunByChatId(id))) {
+                    await releaseSyncLease();
+                  }
+                })
+                .catch(() =>
+                  console.error(
+                    "[desktop-sync] Unable to verify Web run completion"
+                  )
+                );
+            }
+            // 协作实时：run 已启动且本请求成功 attach，通知房间其他成员
+            // resumeStream attach 活跃 run（与断线重连同一重放/活流 tail）。
+            publishChatRun({
+              actorId: session.user.id,
+              chatId: id,
+              phase: "started",
+            });
+            // 显式 start：客户端/DB/重放共用同一确定性消息 id（§2.5）
+            dataStream.write({ messageId: attached.messageId, type: "start" });
+
+            const detach = () => subscription?.close();
+            request.signal.addEventListener("abort", detach, { once: true });
+            try {
+              await pumpRunSubscription(dataStream, subscription, {
+                // 任意内容块事件即视为模型活跃(含 tool 通道,与原事件桥一致)
+                onEvent: (event) => {
+                  if (event.type === "message.delta") {
+                    markModelActive();
+                  }
+                },
+              });
+            } finally {
+              request.signal.removeEventListener("abort", detach);
+            }
           } finally {
-            request.signal.removeEventListener("abort", detach);
+            stopWaitingStatus();
+            subscription?.close();
+          }
+
+          if (titlePromise) {
+            try {
+              const title = await titlePromise;
+              await updateChatTitleById({ chatId: id, title });
+              dataStream.write({ data: title, type: "data-chat-title" });
+            } catch {
+              /* non-fatal */
+            }
           }
         } finally {
-          stopWaitingStatus();
-          subscription?.close();
-        }
-
-        if (titlePromise) {
-          try {
-            const title = await titlePromise;
-            await updateChatTitleById({ chatId: id, title });
-            dataStream.write({ data: title, type: "data-chat-title" });
-          } catch {
-            /* non-fatal */
+          if (!leaseTransferred) {
+            await releaseSyncLease();
           }
         }
       },
@@ -778,6 +833,10 @@ export async function POST(request: Request) {
       },
     });
 
+    // Lease ownership transfer: from here the POST-level finally must not
+    // release — the stream's execute finally owns pre-attach failures, and the
+    // run's settled hook owns the release once the run outlives the request.
+    streamOwnsLease = true;
     return createUIMessageStreamResponse({ stream });
   } catch (error) {
     const vercelId = request.headers.get("x-vercel-id");
@@ -788,6 +847,10 @@ export async function POST(request: Request) {
 
     console.error("Unhandled error in chat API:", error, { vercelId });
     return new ChatbotError("offline:chat").toResponse();
+  } finally {
+    if (!streamOwnsLease) {
+      await releaseSyncLease();
+    }
   }
 }
 

@@ -22,6 +22,7 @@ export type ModelPluginInstallationView = {
   credentialFields: CredentialFieldSchema[];
   credentialSummary: Record<string, string>;
   credentialsConfigured: boolean;
+  credentialReadable?: boolean;
   defaultModelId: string | null;
   description: string;
   enabled: boolean;
@@ -62,4 +63,21 @@ export function initialCredentialValues(
 
 export function asProviderDefinition(value: unknown): ProviderDefinition {
   return value as ProviderDefinition;
+}
+
+/** Recover only when the submitted values replace every field that might have been stored. */
+export function mergeCredentialUpdate(
+  current: Record<string, unknown> | null,
+  submitted: Record<string, unknown>,
+  fields: readonly { variable: string }[]
+): Record<string, unknown> | null {
+  const values = Object.fromEntries(
+    Object.entries(submitted).filter(
+      ([, value]) => typeof value !== "string" || value.trim().length > 0
+    )
+  );
+  if (!current && fields.some((field) => !(field.variable in values))) {
+    return null;
+  }
+  return { ...(current ?? {}), ...values };
 }

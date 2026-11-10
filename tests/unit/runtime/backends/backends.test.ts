@@ -1,3 +1,4 @@
+import { obj, str } from "@earendil-works/pi-schema";
 import "../../../support/runtime-env";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
@@ -12,7 +13,6 @@ import {
   fauxText,
   fauxThinking,
   fauxToolCall,
-  Type,
 } from "@earendil-works/pi-ai";
 import { getPiModel, getTestFauxHandle } from "@/lib/ai/pi";
 import { DurableBackend } from "../../../../lib/runtime/backends/durable/backend";
@@ -313,7 +313,7 @@ const echoTool: AgentTool = {
   }),
   label: "Echo test",
   name: "echo_test",
-  parameters: Type.Object({ text: Type.String() }),
+  parameters: obj({ text: str() }),
 };
 
 /** 场景 1：text + reasoning 的完整事件序列 */

@@ -40,6 +40,22 @@ export async function getUserRolePolicies(userId: string) {
     .where(and(eq(member.userId, userId), eq(member.status, "enabled")))
     .orderBy(asc(role.createdAt), asc(role.id));
 }
+// The additive desktop migration may lag behind this code during a rolling
+// deploy, so probe lazily. Only positive results are cached: once installed the
+// table never disappears, while a not-yet-installed result keeps re-probing so
+// a migration applied at runtime is picked up without a process restart.
+let desktopUsageTableInstalled = false;
+
+async function isDesktopUsageTableInstalled(): Promise<boolean> {
+  if (!desktopUsageTableInstalled) {
+    const available = await getDb().execute<{ installed: boolean }>(
+      sql`select to_regclass('"DesktopInferenceUsage"') is not null as installed`
+    );
+    desktopUsageTableInstalled = available[0]?.installed === true;
+  }
+  return desktopUsageTableInstalled;
+}
+
 /** Each completed message counted once per role; organization membership is current, not historical. */
 export async function getRoleTokenUsage(roleId: string, runId?: string) {
   const rows = await getDb().execute<{
@@ -56,5 +72,31 @@ export async function getRoleTokenUsage(roleId: string, runId?: string) {
     where e.type = 'message.completed' and ((e."createdAt" >= date_trunc('month', current_date) and e."createdAt" < date_trunc('month', current_date) + interval '1 month') or r.id = ${runId ?? null}::uuid)
       and exists (select 1 from "Member" m join "MemberRole" mr on mr."memberId" = m.id where m."userId" = r."userId" and mr."roleId" = ${roleId}::uuid)
   `);
-  return rows[0] ?? { daily: 0, missing: 0, monthly: 0, perRun: 0 };
+  const result = rows[0] ?? { daily: 0, missing: 0, monthly: 0, perRun: 0 };
+  // Existing Web traffic remains available until the additive desktop migration is installed.
+  // The desktop inference endpoint itself fails closed if its usage table is absent.
+  if (!(await isDesktopUsageTableInstalled())) {
+    return result;
+  }
+  const desktop = await getDb().execute<{
+    daily: number;
+    monthly: number;
+    perRun: number;
+    missing: number;
+  }>(sql`
+    select coalesce(sum(d."totalTokens") filter (where d."createdAt" >= current_date and d."createdAt" < current_date + interval '1 day'),0)::float as daily,
+      coalesce(sum(d."totalTokens") filter (where d."createdAt" >= date_trunc('month',current_date) and d."createdAt" < date_trunc('month',current_date) + interval '1 month'),0)::float as monthly,
+      coalesce(sum(d."totalTokens") filter (where d."runId" = ${runId ?? null}::uuid),0)::float as "perRun",
+      count(*) filter (where d."totalTokens" is null and d."createdAt" >= date_trunc('month',current_date) and d."createdAt" < date_trunc('month',current_date) + interval '1 month')::int as missing
+    from "DesktopInferenceUsage" d
+    where ((d."createdAt" >= date_trunc('month',current_date) and d."createdAt" < date_trunc('month',current_date) + interval '1 month') or d."runId" = ${runId ?? null}::uuid)
+      and exists (select 1 from "Member" m join "MemberRole" mr on mr."memberId"=m.id where m."userId"=d."userId" and mr."roleId"=${roleId}::uuid)
+  `);
+  const extra = desktop[0] ?? { daily: 0, missing: 0, monthly: 0, perRun: 0 };
+  return {
+    daily: result.daily + extra.daily,
+    missing: result.missing + extra.missing,
+    monthly: result.monthly + extra.monthly,
+    perRun: result.perRun + extra.perRun,
+  };
 }

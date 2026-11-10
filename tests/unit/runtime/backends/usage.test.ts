@@ -2,7 +2,11 @@ import "../../../support/runtime-env";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import type { EntryRecord } from "@earendil-works/pi-durable";
+import type {
+  ConversationId,
+  ConversationView,
+  EntryRecord,
+} from "@earendil-works/pi-durable";
 import { DurableEventNormalizer } from "../../../../lib/runtime/backends/durable/event-normalizer";
 import { PiEventNormalizer } from "../../../../lib/runtime/backends/pi-event-normalizer";
 import { normalizeUsage } from "../../../../lib/runtime/backends/usage";
@@ -33,7 +37,6 @@ test("completed assistant messages preserve authoritative Pi usage totals", () =
     });
     assert.deepEqual(runtimeEventData(event).model, event.model);
     const durable = new DurableEventNormalizer();
-    durable.feed({ message, type: "message_start" });
     const entry: EntryRecord = {
       conversationId: 1 as EntryRecord["conversationId"],
       id: 1 as EntryRecord["id"],
@@ -41,7 +44,11 @@ test("completed assistant messages preserve authoritative Pi usage totals", () =
       model: [message],
     };
     const durableCompleted = durable
-      .feed({ entry, type: "message_end" })
+      .feed({
+        conversation: { id: 1 as ConversationId },
+        docs: {},
+        entries: [entry],
+      } as ConversationView)
       .find((item) => item.type === "message.completed");
     assert.deepEqual(durableCompleted, event);
     assert.deepEqual(event.usage, {

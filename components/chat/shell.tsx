@@ -44,6 +44,29 @@ export function ChatShell() {
     null
   );
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [desktopSynced, setDesktopSynced] = useState(false);
+  const hasMessages = messages.length > 0;
+  useEffect(() => {
+    const controller = new AbortController();
+    setDesktopSynced(false);
+    if (hasMessages) {
+      fetch(`/api/desktop/sync/${encodeURIComponent(chatId)}`, {
+        headers: { "x-piwork-desktop": "1" },
+        signal: controller.signal,
+      })
+        .then((response) => {
+          if (!controller.signal.aborted) {
+            setDesktopSynced(response.ok);
+          }
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) {
+            setDesktopSynced(false);
+          }
+        });
+    }
+    return () => controller.abort();
+  }, [chatId, hasMessages]);
   const isArtifactVisible = useArtifactSelector((state) => state.isVisible);
   const { setArtifact } = useArtifact();
   const conversationTitle = useMemo(() => {
@@ -143,6 +166,14 @@ export function ChatShell() {
             title={conversationTitle}
           />
 
+          {desktopSynced ? (
+            <p
+              className="border-b px-4 py-2 text-center text-xs text-muted-foreground"
+              role="note"
+            >
+              {t("chat.desktopSyncNotice")}
+            </p>
+          ) : null}
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
             <Messages
               addToolApprovalResponse={addToolApprovalResponse}

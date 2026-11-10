@@ -4,11 +4,11 @@ import { ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useActionState, useEffect, useState } from "react";
-
 import { AuthForm } from "@/components/chat/auth-form";
 import { SubmitButton } from "@/components/chat/submit-button";
 import { toast } from "@/components/chat/toast";
 import { usePreferences } from "@/components/preferences-provider";
+import { desktopLoginReturn } from "@/lib/auth/desktop-login-return";
 import { type LoginActionState, login } from "../actions";
 
 export default function Page() {
@@ -39,6 +39,12 @@ export default function Page() {
     } else if (state.status === "success") {
       setIsSuccessful(true);
       updateSession();
+      const target = desktopLoginReturn(
+        new URLSearchParams(window.location.search).get("callbackUrl")
+      );
+      if (target) {
+        router.replace(`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}${target}`);
+      }
       router.refresh();
     }
   }, [state.status, t]);

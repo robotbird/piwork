@@ -5,8 +5,8 @@ import {
   type ModelPluginsView,
 } from "@/lib/admin/model-plugins";
 import { listPluginInstallations } from "@/lib/db/model-plugin-queries";
-
 import { loadBuiltinPluginCatalog } from "./builtin-catalog";
+import { decryptPluginCredentials } from "./credentials";
 import { pickLocalizedText } from "./registry";
 
 export async function loadModelPluginsView(): Promise<ModelPluginsView> {
@@ -30,6 +30,14 @@ export async function loadModelPluginsView(): Promise<ModelPluginsView> {
     })),
     installed: records.map((record) => {
       const definition = asProviderDefinition(record.definition);
+      let credentialReadable = true;
+      if (record.credentialsConfigured) {
+        try {
+          decryptPluginCredentials(record.encryptedCredentials);
+        } catch {
+          credentialReadable = false;
+        }
+      }
       // Legacy installations keep their saved schema/models; only public endpoint metadata
       // falls back to the matching packaged definition, never a provider name guess.
       const packaged = catalog.find(
@@ -38,6 +46,7 @@ export async function loadModelPluginsView(): Promise<ModelPluginsView> {
       )?.definition;
       return {
         credentialFields: definition.credentialFields,
+        credentialReadable,
         credentialSummary: record.credentialSummary,
         credentialsConfigured: record.credentialsConfigured,
         defaultBaseUrl: definition.defaultBaseUrl ?? packaged?.defaultBaseUrl,

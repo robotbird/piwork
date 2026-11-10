@@ -1,6 +1,5 @@
 import { posix } from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { Type } from "@earendil-works/pi-ai";
 import {
   createBashToolDefinition,
   createEditTool,
@@ -14,6 +13,7 @@ import {
   truncateTail,
   type WriteToolInput,
 } from "@earendil-works/pi-coding-agent";
+import { obj, str } from "@earendil-works/pi-schema";
 import { getSupportedAttachmentType } from "@/lib/ai/attachment-types";
 import type { RuntimeArtifact } from "../../protocol";
 import type { SandboxFilesystem } from "../../sandbox/filesystem";
@@ -374,7 +374,7 @@ export function createSandboxTools(options: {
       executionMode: "sequential",
       label: "交付文件",
       name: "deliver_file",
-      parameters: Type.Object({ path: Type.String() }),
+      parameters: obj({ path: str() }),
     });
   }
   return {

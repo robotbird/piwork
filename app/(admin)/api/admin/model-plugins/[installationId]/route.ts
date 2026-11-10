@@ -1,6 +1,9 @@
 import { getLocale, getTranslations } from "next-intl/server";
 import { requireAdminRole } from "@/lib/admin/access";
-import { asProviderDefinition } from "@/lib/admin/model-plugins";
+import {
+  asProviderDefinition,
+  mergeCredentialUpdate,
+} from "@/lib/admin/model-plugins";
 import { invalidateActiveModelCatalog } from "@/lib/ai/active-models";
 import {
   deletePluginInstallation,
@@ -108,17 +111,22 @@ export async function PATCH(
         pluginPackage.fileName,
         pluginPackage.zipBytes
       );
-      const currentCredentials = decryptPluginCredentials(
-        record.encryptedCredentials
+      let currentCredentials: Record<string, unknown> | null;
+      try {
+        currentCredentials = decryptPluginCredentials(
+          record.encryptedCredentials
+        );
+      } catch {
+        currentCredentials = null;
+      }
+      const nextCredentials = mergeCredentialUpdate(
+        currentCredentials,
+        body.credentials,
+        definition.credentialFields
       );
-      const nextCredentials = {
-        ...currentCredentials,
-        ...Object.fromEntries(
-          Object.entries(body.credentials).filter(
-            ([, value]) => typeof value !== "string" || value.trim().length > 0
-          )
-        ),
-      };
+      if (!nextCredentials) {
+        return errorResponse(new Error(t("credentialRecoveryRequired")));
+      }
       for (const field of definition.credentialFields) {
         if (
           field.required &&

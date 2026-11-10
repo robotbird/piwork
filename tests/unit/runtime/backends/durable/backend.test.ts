@@ -1,14 +1,11 @@
+import { obj } from "@earendil-works/pi-schema";
 import "../../../../support/runtime-env";
 import assert from "node:assert/strict";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import {
-  fauxAssistantMessage,
-  fauxToolCall,
-  Type,
-} from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { getPiModel, getTestFauxHandle } from "../../../../../lib/ai/pi";
 import { DurableBackend } from "../../../../../lib/runtime/backends/durable/backend";
 import { openOwnedDurableStorage } from "../../../../../lib/runtime/backends/durable/storage";
@@ -98,7 +95,7 @@ test("Durable backend: revoked execute grant cannot be masked by a later model s
       },
       label: "policy",
       name: "policy",
-      parameters: Type.Object({}),
+      parameters: obj({}),
     },
   ];
   const backend = new DurableBackend({
@@ -195,7 +192,7 @@ test("Durable adapter preserves full tool output in the next official model requ
       }),
       label: "output probe",
       name: "output_probe",
-      parameters: Type.Object({}),
+      parameters: obj({}),
     },
   ];
   const faux = getTestFauxHandle();

@@ -4,7 +4,6 @@ import { dirname, extname, isAbsolute, relative, resolve } from "node:path";
 
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { Type } from "@earendil-works/pi-ai";
 import {
   formatSkillsForPrompt,
   loadSkillsFromDir,
@@ -12,6 +11,7 @@ import {
   stripFrontmatter,
 } from "@earendil-works/pi-coding-agent";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
+import { obj, opt, str } from "@earendil-works/pi-schema";
 import { unzipSync } from "fflate";
 import { LocalizedError } from "@/lib/i18n/messages";
 import { getInstallableCatalogSkill } from "./skill-catalog";
@@ -1493,10 +1493,10 @@ export function createSkillTools(
     },
     label: "Load skill",
     name: "load_skill",
-    parameters: Type.Object({
-      name: Type.String({ description: "Exact name of the skill to load" }),
-      task: Type.Optional(
-        Type.String({
+    parameters: obj({
+      name: str({ description: "Exact name of the skill to load" }),
+      task: opt(
+        str({
           description: "The user's task or arguments to execute with the skill",
         })
       ),
@@ -1531,22 +1531,22 @@ export function createSkillTools(
     executionMode: "sequential",
     label: "Create skill",
     name: "create_skill",
-    parameters: Type.Object({
-      description: Type.String({
+    parameters: obj({
+      description: str({
         description:
           "Specific description of what the skill does and when it should be used",
       }),
-      displayName: Type.Optional(
-        Type.String({
+      displayName: opt(
+        str({
           description:
             "Human-friendly title shown in the chat UI, such as Weekly Report. Defaults to a title-cased skill name.",
         })
       ),
-      instructions: Type.String({
+      instructions: str({
         description:
           "Complete Markdown workflow, including constraints, steps, expected outputs, and relative references when needed",
       }),
-      name: Type.String({
+      name: str({
         description:
           "Skill name: lowercase letters, numbers and single hyphens, maximum 64 characters",
       }),

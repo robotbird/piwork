@@ -176,6 +176,27 @@
       "when": 1792331307237,
       "tag": "0024_agent_run_stop_cleanup",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793855000000,
+      "tag": "0025_desktop_inference_usage",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793862650931,
+      "tag": "0026_desktop_sync_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1794225580936,
+      "tag": "0027_desktop_browser_login",
+      "breakpoints": true
     }
   ]
 }

@@ -1,8 +1,8 @@
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { Type } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { obj, str } from "@earendil-works/pi-schema";
 import { formatToolStatus as formatLocalizedToolStatus } from "@/lib/chat/tool-status";
 import { translateMessage } from "@/lib/i18n/messages";
 import type { ChatMessage, DeliveredFileData } from "@/lib/types";
@@ -119,8 +119,8 @@ export function createDeliverFileTool({
     executionMode: "sequential",
     label: "Deliver file",
     name: "deliver_file",
-    parameters: Type.Object({
-      path: Type.String({
+    parameters: obj({
+      path: str({
         description: "Path of the file to deliver, relative to the workspace",
       }),
     }),

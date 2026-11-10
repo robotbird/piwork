@@ -262,7 +262,10 @@ test("全链路：fauxProvider 上游 → SSE 官方事件序列 + allowed 审�
     }),
   });
   try {
-    const result = await post(proxy.url, validBody(), proxy.mint());
+    const body = JSON.parse(validBody());
+    // Pi 1.5 simulates prompt caching when sessionId is present.
+    body.options.cacheRetention = "none";
+    const result = await post(proxy.url, JSON.stringify(body), proxy.mint());
     assert.equal(result.status, 200);
     assert.match(result.contentType, /text\/event-stream/);
     const events = parseSse(result.text);

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { initialCredentialValues } from "../../../lib/admin/model-plugins";
+import {
+  initialCredentialValues,
+  mergeCredentialUpdate,
+} from "../../../lib/admin/model-plugins";
 import {
   definition as deepseek,
   DEFAULT_BASE_URL as deepseekUrl,
@@ -62,5 +65,27 @@ test("configured forms leave credentials empty so rotating keys cannot reset cus
       credentialsConfigured: true,
     }),
     {}
+  );
+});
+
+test("credential recovery requires all fields when the old ciphertext is unreadable", () => {
+  assert.deepEqual(
+    mergeCredentialUpdate(null, { api_key: "new" }, [{ variable: "api_key" }]),
+    { api_key: "new" }
+  );
+  assert.equal(
+    mergeCredentialUpdate(null, { api_key: "new" }, [
+      { variable: "api_key" },
+      { variable: "api_host" },
+    ]),
+    null
+  );
+  assert.deepEqual(
+    mergeCredentialUpdate(
+      { api_host: "custom", api_key: "old" },
+      { api_host: "", api_key: "new" },
+      [{ variable: "api_key" }, { variable: "api_host" }]
+    ),
+    { api_host: "custom", api_key: "new" }
   );
 });

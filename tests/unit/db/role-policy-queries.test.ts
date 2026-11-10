@@ -68,6 +68,15 @@ test("role policies persist, scope usage, reset, reject disabled accounts", {
       (${runId}, 5, 'message.completed', date_trunc('month',current_date)-interval '1 day', '{"usage":{"totalTokens":7}}'::json)`);
     const usage = await getRoleTokenUsage(roleIds[0], runId);
     assert.deepEqual(usage, { daily: 20, missing: 1, monthly: 20, perRun: 27 });
+    await db.execute(
+      sql`insert into "DesktopInferenceUsage" ("userId", "runId", "totalTokens") values (${userId}, ${runId}, 3), (${userId}, ${runId}, null)`
+    );
+    assert.deepEqual(await getRoleTokenUsage(roleIds[0], runId), {
+      daily: 23,
+      missing: 2,
+      monthly: 23,
+      perRun: 30,
+    });
     assert.equal((await getRoleTokenUsage(crypto.randomUUID())).daily, 0);
     await updateRolePolicy(roleIds[0], {
       modelPolicy: null,

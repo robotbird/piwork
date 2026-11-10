@@ -1,188 +1,234 @@
 import "../../../../support/runtime-env";
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  type AssistantMessage,
-  fauxAssistantMessage,
-  type TextContent,
-  type Usage,
-} from "@earendil-works/pi-ai";
-import type { SnapshotEvent, TaskId } from "@earendil-works/pi-durable";
+import { fauxAssistantMessage, type Message } from "@earendil-works/pi-ai";
+import type {
+  ConversationId,
+  ConversationView,
+  EntryId,
+  EntryRecord,
+  LiveState,
+  TaskId,
+} from "@earendil-works/pi-durable";
 import { DurableEventNormalizer } from "../../../../../lib/runtime/backends/durable/event-normalizer";
 import type { RuntimeEvent } from "../../../../../lib/runtime/protocol";
 
-test("Durable nested tool completion uses the official result error flag", () => {
-  const normalizer = new DurableEventNormalizer();
-  for (const isError of [false, true]) {
-    const events = normalizer.feed({
-      parentToolCallId: "parent",
-      result: { diagnostics: [], isError, taskId: 1 as TaskId },
-      toolCallId: "parent/child",
-      toolName: "read",
-      type: "tool_execution_end",
-    });
-    assert.deepEqual(events, [
-      {
-        isError,
-        toolCallId: "parent/child",
-        toolName: "read",
-        type: "tool.completed",
-      },
-    ]);
-  }
-});
-
-const usage: Usage = {
-  cacheRead: 0,
-  cacheWrite: 0,
-  cost: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0, total: 0 },
-  input: 0,
-  output: 0,
-  totalTokens: 0,
-};
-
-function assistantMessage(
-  content: AssistantMessage["content"]
-): AssistantMessage {
-  return { ...fauxAssistantMessage(""), content };
-}
-
-function textBlock(text: string): TextContent {
-  return { text, type: "text" };
-}
-
-/** 官方 watch overflow 契约：以 snapshot 帧顶替未送达批次 */
-function snapshotWith(content: AssistantMessage["content"]): SnapshotEvent {
+function view(
+  live: LiveState = {},
+  entries: EntryRecord[] = []
+): ConversationView {
   return {
-    generation: { attempt: 1, message: assistantMessage(content) },
-    type: "snapshot",
-  } as SnapshotEvent;
+    conversation: { id: 1 as ConversationId },
+    docs: { "pi.live": live },
+    entries,
+  } as ConversationView;
 }
 
-/** 块事件投影：channel:phase(delta)，非块事件用 type */
+function entry(id: number, message: Message): EntryRecord {
+  return {
+    conversationId: 1 as ConversationId,
+    id: id as EntryId,
+    kind: message.role,
+    model: [message],
+  } as EntryRecord;
+}
+
 function outline(events: RuntimeEvent[]): string[] {
   return events.map((event) =>
     event.type === "message.delta"
-      ? `${event.channel}:${event.phase}${
-          event.delta === undefined ? "" : `(${event.delta})`
-        }`
+      ? `${event.channel}:${event.phase}${event.delta === undefined ? "" : `(${event.delta})`}`
       : event.type
   );
 }
 
-test("message.delta 事件携带归一化时刻 at（epoch ms）", () => {
+function partial(text: string): LiveState {
+  return {
+    generation: {
+      attempt: 1,
+      message: JSON.parse(JSON.stringify(fauxAssistantMessage(text))),
+    },
+  };
+}
+
+test("committed partials and final entries emit each character once", () => {
   const normalizer = new DurableEventNormalizer();
-  const initial = normalizer.feed({
-    message: assistantMessage([
-      { thinking: "先想想", type: "thinking" },
-    ] as AssistantMessage["content"]),
-    type: "message_start",
-  });
-  const appended = normalizer.feed({
-    changes: [
-      { contentIndex: 0, delta: "更多", type: "thinking_delta" } as const,
-    ],
-    type: "message_update",
-    usage,
-  });
-  const deltas = [...initial, ...appended].filter(
-    (event): event is Extract<RuntimeEvent, { type: "message.delta" }> =>
-      event.type === "message.delta"
-  );
-  // message_start 的合成 start/delta + 新增 delta
-  assert.ok(deltas.length >= 3);
-  for (const delta of deltas) {
-    assert.equal(typeof delta.at, "number");
-    assert.ok((delta.at ?? 0) > 0);
+  assert.deepEqual(outline(normalizer.feed(view(partial("ab")))), [
+    "message.started",
+    "text:start",
+    "text:delta(ab)",
+  ]);
+  assert.deepEqual(outline(normalizer.feed(view(partial("abcdef")))), [
+    "text:delta(cdef)",
+  ]);
+  const final = view({}, [entry(1, fauxAssistantMessage("abcdefg"))]);
+  const events = normalizer.feed(final);
+  assert.deepEqual(outline(events), [
+    "text:delta(g)",
+    "text:end",
+    "message.completed",
+  ]);
+  assert.deepEqual(normalizer.feed(final), []);
+  for (const event of events) {
+    if (event.type === "message.delta") {
+      assert.ok((event.at ?? 0) > 0);
+    }
   }
 });
 
-test("delta for a block without start synthesizes start before the delta", () => {
+test("whole answers survive coalesced watches and existing history is skipped", () => {
   const normalizer = new DurableEventNormalizer();
-  normalizer.feed({ message: assistantMessage([]), type: "message_start" });
+  const history = entry(1, fauxAssistantMessage("old"));
+  normalizer.initialize(view({}, [history]));
   assert.deepEqual(
     outline(
-      normalizer.feed({
-        changes: [
-          { contentIndex: 0, delta: "晚", type: "text_delta" } as const,
-        ],
-        type: "message_update",
-        usage,
-      })
+      normalizer.feed(
+        view({}, [history, entry(2, fauxAssistantMessage("new"))])
+      )
     ),
-    ["text:start", "text:delta(晚)"]
+    [
+      "message.started",
+      "text:start",
+      "text:delta(new)",
+      "text:end",
+      "message.completed",
+    ]
   );
+  assert.equal(normalizer.runEnded, true);
 });
 
-test("delta after the block closed reopens it instead of emitting an orphan delta", () => {
+test("reasoning closes before text and closed blocks are not repeated", () => {
   const normalizer = new DurableEventNormalizer();
-  normalizer.feed({
-    message: assistantMessage([textBlock("ab")]),
-    type: "message_start",
-  });
-  normalizer.feed({
-    changes: [{ block: textBlock("ab"), contentIndex: 0, type: "block" }],
-    type: "message_update",
-    usage,
-  });
+  const message = {
+    ...fauxAssistantMessage(""),
+    content: [
+      { thinking: "think", type: "thinking" as const },
+      { text: "answer", type: "text" as const },
+    ],
+  };
   assert.deepEqual(
     outline(
-      normalizer.feed({
-        changes: [
-          { contentIndex: 0, delta: "cd", type: "text_delta" } as const,
-        ],
-        type: "message_update",
-        usage,
+      normalizer.feed(
+        view({
+          generation: {
+            attempt: 1,
+            message: JSON.parse(JSON.stringify(message)),
+          },
+        })
+      )
+    ),
+    [
+      "message.started",
+      "reasoning:start",
+      "reasoning:delta(think)",
+      "reasoning:end",
+      "text:start",
+      "text:delta(answer)",
+    ]
+  );
+  assert.deepEqual(
+    normalizer.feed(
+      view({
+        generation: {
+          attempt: 1,
+          message: JSON.parse(JSON.stringify(message)),
+        },
       })
     ),
-    ["text:start", "text:delta(cd)"]
-  );
-});
-
-test("snapshot frame backfills deltas dropped by watch overflow", () => {
-  const normalizer = new DurableEventNormalizer();
-  normalizer.feed({
-    message: assistantMessage([textBlock("ab")]),
-    type: "message_start",
-  });
-  assert.deepEqual(
-    outline(normalizer.feed(snapshotWith([textBlock("abcdef")]))),
-    ["text:delta(cdef)"]
-  );
-  assert.deepEqual(
-    outline(
-      normalizer.feed({
-        changes: [{ contentIndex: 0, delta: "g", type: "text_delta" } as const],
-        type: "message_update",
-        usage,
-      })
-    ),
-    ["text:delta(g)"]
-  );
-});
-
-test("snapshot frame restarts blocks whose start was dropped", () => {
-  const normalizer = new DurableEventNormalizer();
-  normalizer.feed({ message: assistantMessage([]), type: "message_start" });
-  assert.deepEqual(
-    outline(normalizer.feed(snapshotWith([textBlock("hello")]))),
-    ["text:start", "text:delta(hello)"]
-  );
-});
-
-test("snapshot frame keeps closed blocks closed", () => {
-  const normalizer = new DurableEventNormalizer();
-  normalizer.feed({
-    message: assistantMessage([textBlock("ab")]),
-    type: "message_start",
-  });
-  normalizer.feed({
-    changes: [{ block: textBlock("ab"), contentIndex: 0, type: "block" }],
-    type: "message_update",
-    usage,
-  });
-  assert.deepEqual(
-    outline(normalizer.feed(snapshotWith([textBlock("ab")]))),
     []
   );
+  assert.deepEqual(outline(normalizer.feed(view({}, [entry(1, message)]))), [
+    "text:end",
+    "message.completed",
+  ]);
+});
+
+test("tool entries retain start arguments and error status after coalescing", () => {
+  const normalizer = new DurableEventNormalizer();
+  const message = {
+    ...fauxAssistantMessage(""),
+    content: [
+      {
+        arguments: { path: "file" },
+        id: "call",
+        name: "read",
+        type: "toolCall" as const,
+      },
+    ],
+  };
+  const result: Message = {
+    content: [],
+    isError: true,
+    role: "toolResult",
+    timestamp: 0,
+    toolCallId: "call",
+    toolName: "read",
+  };
+  const events = normalizer.feed(
+    view({}, [entry(1, message), entry(2, result)])
+  );
+  assert.deepEqual(
+    events.filter((event) => event.type.startsWith("tool.")),
+    [
+      {
+        args: { path: "file" },
+        toolCallId: "call",
+        toolName: "read",
+        type: "tool.started",
+      },
+      {
+        isError: true,
+        toolCallId: "call",
+        toolName: "read",
+        type: "tool.completed",
+      },
+    ]
+  );
+});
+
+test("nested tool completion uses the official summary error flag", () => {
+  for (const isError of [false, true]) {
+    const normalizer = new DurableEventNormalizer();
+    const live = {
+      nestedTools: [
+        {
+          arguments: {},
+          callId: "parent/child",
+          name: "read",
+          parentCallId: "parent",
+          parentTaskId: 2,
+          status: "done",
+          summary: { isError },
+          taskId: 1,
+        },
+      ],
+    } as LiveState;
+    const events = normalizer.feed(view(live));
+    assert.deepEqual(events.at(-1), {
+      isError,
+      toolCallId: "parent/child",
+      toolName: "read",
+      type: "tool.completed",
+    });
+    assert.deepEqual(normalizer.feed(view(live)), []);
+  }
+});
+
+test("run disappearance signals settlement even without an answer", () => {
+  const normalizer = new DurableEventNormalizer();
+  normalizer.feed(
+    view({ run: { inputs: [], taskId: 1 as TaskId, turns: 0 } } as LiveState)
+  );
+  assert.equal(normalizer.runEnded, false);
+  normalizer.feed(
+    view({
+      runFailure: {
+        detail: "unavailable",
+        inputs: [],
+        reason: "model_error",
+        taskId: 1 as TaskId,
+      },
+    } as LiveState)
+  );
+  assert.equal(normalizer.runEnded, true);
+  assert.equal(normalizer.failure, "unavailable");
 });

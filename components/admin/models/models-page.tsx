@@ -404,7 +404,9 @@ function ConfigureDialog({
           <DialogTitle>{installation?.name ?? ""}</DialogTitle>
           <DialogDescription>
             {installation?.credentialsConfigured
-              ? t("modelPlugins.configuredDescription")
+              ? installation.credentialReadable === false
+                ? t("modelPlugins.credentialsUnreadableHint")
+                : t("modelPlugins.configuredDescription")
               : t("modelPlugins.unconfiguredDescription")}
           </DialogDescription>
         </DialogHeader>
@@ -701,6 +703,7 @@ export function ModelsPage({ initialData }: { initialData: ModelPluginsView }) {
                             className={cn(
                               "text-xs font-medium",
                               item.credentialsConfigured &&
+                                item.credentialReadable !== false &&
                                 item.enabled &&
                                 item.healthStatus === "healthy"
                                 ? "text-emerald-600 dark:text-emerald-400"
@@ -708,7 +711,9 @@ export function ModelsPage({ initialData }: { initialData: ModelPluginsView }) {
                             )}
                           >
                             {item.credentialsConfigured
-                              ? item.enabled
+                              ? item.credentialReadable === false
+                                ? t("modelPlugins.credentialsUnreadable")
+                                : item.enabled
                                 ? t("modelPlugins.healthy")
                                 : t("skills.disabled")
                               : t("modelPlugins.apiKeyRequired")}
