@@ -36,6 +36,7 @@ packages/model-provider-sdk/dist/
 
 # Local editor/agent state
 .claude/
+.zcode/
 .zcodeignore
 .agents/
 .husky/
