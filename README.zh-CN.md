@@ -11,7 +11,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 [![Next.js 16](https://img.shields.io/badge/Next.js_16-000000.svg?logo=nextdotjs&logoColor=white)](https://nextjs.org)
 [![React 19](https://img.shields.io/badge/React_19-61DAFB.svg?logo=react&logoColor=black)](https://react.dev)
-[![Pi Agent 1.5.0](https://img.shields.io/badge/Pi_Agent-1.5.0-7C3AED.svg)](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
+[![Pi Agent 1.5.2](https://img.shields.io/badge/Pi_Agent-1.5.2-7C3AED.svg)](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
 [![Node >=22](https://img.shields.io/badge/node-%3E%3D22-339933.svg?logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![Stars](https://img.shields.io/github/stars/robotbird/piwork.svg?style=social)](https://github.com/robotbird/piwork/stargazers)
 
