@@ -46,7 +46,7 @@
 - ⏰ **Scheduled tasks** — cron-style recurring agent tasks with run history
 - 🤝 **Chat collaboration** — share chats with teammates, live presence and typing indicators
 - 🏢 **Organization management** — members, departments, and roles with per-role model permissions and token quotas
-- 🔍 **Optional web search** — integrate [Tavily](https://tavily.com) as a platform-hosted search tool
+- 🔍 **Optional web search** — integrate [Tavily](https://tavily.com) as a platform-hosted search tool, or enable the [pi-web-access](https://github.com/nicobailon/pi-web-access) Pi package (keyless DuckDuckGo and more) via the extension runtime
 - 🌐 **Internationalization** — English and Simplified Chinese UI
 
 <p align="right">(<a href="#readme-top">back to top ⬆️</a>)</p>

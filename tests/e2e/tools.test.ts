@@ -245,11 +245,12 @@ test.describe
       };
       expect(packages.some((item) => item.source === fixtureSource)).toBe(true);
 
-      // Pi 插件视图已从后台隐藏:历史 URL 回退到默认 MCP 视图,不再渲染插件页
+      // Pi 插件管理仅在管理后台:?view=pi-plugins 视图渲染插件页(含扩展安全提示)
       await page.goto(`${TOOLS_URL}?view=pi-plugins`);
       await expect(
-        page.getByRole("heading", { name: "MCP 服务" })
+        page.getByRole("heading", { name: "Pi 插件" })
       ).toBeVisible();
+      await expect(page.getByText("同进程执行").first()).toBeVisible();
 
       // 跨模块断言:提取的技能出现在技能管理页(带 Pi 插件来源)
       await page.goto("/admin/skills");

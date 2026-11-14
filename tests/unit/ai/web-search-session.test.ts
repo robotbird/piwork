@@ -10,7 +10,7 @@ import { MANAGED_AGENT_DIR } from "../../../lib/pi-packages/agent-dir";
 import { PiEventNormalizer } from "../../../lib/runtime/backends/pi-event-normalizer";
 import { WEB_SEARCH_TOOL } from "../../../lib/search/protocol";
 
-test("official AgentSession calls search in lightweight whitelist, with no builtin/managed tools", async (t) => {
+test("official AgentSession calls search in lightweight session, with no builtin tools", async (t) => {
   let calls = 0;
   const handle = getTestFauxHandle();
   assert.ok(handle);
@@ -51,7 +51,11 @@ test("official AgentSession calls search in lightweight whitelist, with no built
     ],
   });
   t.after(() => agent.dispose());
-  assert.deepEqual(agent.session.getActiveToolNames(), [WEB_SEARCH_TOOL]);
+  // 扩展运行时默认开启,受管 agentDir 已装包(如 pi-web-access)的扩展工具
+  // 会一并出现;本测试只关心平台工具在内建工具关闭时仍可用
+  const activeTools = agent.session.getActiveToolNames();
+  assert.ok(activeTools.includes(WEB_SEARCH_TOOL));
+  assert.equal(activeTools.includes("bash"), false);
   assert.deepEqual(agent.extensionsResult.errors, []);
   const normalizer = new PiEventNormalizer();
   const events: ReturnType<PiEventNormalizer["feed"]> = [];

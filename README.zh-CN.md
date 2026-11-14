@@ -46,7 +46,7 @@
 - ⏰ **定时任务** —— cron 周期任务与运行历史
 - 🤝 **聊天协作** —— 与同事分享对话，实时 presence 与输入状态
 - 🏢 **组织管理** —— 成员、部门与角色，支持按角色的模型权限与 Token 额度
-- 🔍 **可选联网搜索** —— 集成 [Tavily](https://tavily.com) 作为平台侧搜索工具
+- 🔍 **可选联网搜索** —— 集成 [Tavily](https://tavily.com) 作为平台侧搜索工具，或经扩展运行时启用 [pi-web-access](https://github.com/nicobailon/pi-web-access) Pi 插件（支持免 key 的 DuckDuckGo 等）
 - 🌐 **国际化** —— 简体中文与英文界面
 
 <p align="right">(<a href="#readme-top">回到顶部 ⬆️</a>)</p>

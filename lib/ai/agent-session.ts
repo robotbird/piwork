@@ -40,7 +40,7 @@ export type PiworkAgentSessionOptions = {
   appendSystemPrompt: string[];
   /** 会话 cwd:执行工具开启时为聊天工作区;关闭时为 MANAGED_AGENT_DIR */
   cwd: string;
-  /** 轻量会话：关闭内建工具、受管扩展与 MCP，只保留平台显式工具 */
+  /** 轻量会话：关闭内建工具与 MCP，保留平台显式工具与包内扩展工具 */
   disableBuiltinTools?: boolean;
   /** Session-local SDK resize suppression. Caller must also reject unsupported MIME to avoid conversion. */
   disableImageAutoResize?: boolean;
@@ -126,9 +126,11 @@ export async function createPiworkAgentSession(
         name: `piwork-model-bridge-${provider.id}`,
       })),
     ],
-    noContextFiles: true,
     // 工作区是隔离沙箱:AGENTS.md 等上下文文件不自动注入(与现状对齐)
-    noExtensions: options.disableBuiltinTools ?? false,
+    noContextFiles: true,
+    // 包扩展运行时默认开启:管理端安装的 pi 包 extensions 在本进程加载
+    // 执行(显式 factories 不受此开关影响)
+    noExtensions: false,
     noPromptTemplates: true,
     // 切断 ~/.agents/skills 与 ~/.pi 全局技能泄漏;piwork 技能走自有管线
     noSkills: true,
@@ -145,13 +147,10 @@ export async function createPiworkAgentSession(
     cwd: options.cwd,
     model: options.model,
     modelRuntime,
-    // 轻量会话显式限制平台工具；执行会话保留扩展工具发现。
-    ...(options.disableBuiltinTools
-      ? {
-          noTools: "builtin" as const,
-          tools: (options.tools ?? []).map((tool) => tool.name),
-        }
-      : {}),
+    // 轻量会话显式限制平台工具；执行会话保留扩展工具发现。轻量会话不带
+    // 工具白名单:插件工具名在会话创建前不可知,白名单会滤掉它们
+    // (piwork-desktop 同解法);noTools:"builtin" 仍挡内建工具。
+    ...(options.disableBuiltinTools ? { noTools: "builtin" as const } : {}),
     resourceLoader: loader,
     ...(settingsManager ? { settingsManager } : {}),
     sessionManager: SessionManager.inMemory(

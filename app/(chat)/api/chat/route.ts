@@ -59,6 +59,7 @@ import type { DBMessage } from "@/lib/db/schema";
 import { ChatbotError } from "@/lib/errors";
 import { LocalizedError } from "@/lib/i18n/messages";
 import { syncManagedAgentMcpConfig } from "@/lib/mcp/agent-config";
+import { pluginSearchAvailable } from "@/lib/pi-packages/runtime-flag";
 import { buildProjectSourcesContext } from "@/lib/projects/context";
 import { projectDocumentInputsEnabled } from "@/lib/projects/document-inputs";
 import { durableChatExecutionPrompt } from "@/lib/runtime/backends/durable/chat-attachments";
@@ -359,6 +360,10 @@ export async function POST(request: Request) {
       ? await Promise.all([listMcpServers(), listPiPackages()])
       : [[], []];
     const platformWebSearch = webSearchEnabled();
+    // 分类器的能力信号 = Tavily 平台工具或插件路线(pi-web-access 等),
+    // 任一可用即纯搜索问题可留在轻量通道;平台工具装配仍只看 Tavily 开关
+    const webSearchCapable =
+      platformWebSearch || (await pluginSearchAvailable());
     const classification =
       projectClassification ??
       (executionToolsEnabled()
@@ -371,7 +376,7 @@ export async function POST(request: Request) {
                 text: getTextFromMessage(item),
               })),
               message: currentUserText,
-              platformWebSearch,
+              platformWebSearch: webSearchCapable,
               signal: request.signal,
             })
         : { reason: "disabled", requiresExecution: false });

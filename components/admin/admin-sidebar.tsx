@@ -11,6 +11,7 @@ import {
   type LucideIcon,
   MenuIcon,
   MessageSquareIcon,
+  PackageIcon,
   PlugIcon,
   SearchIcon,
   SettingsIcon,
@@ -75,6 +76,12 @@ const navigationGroups: NavigationGroup[] = [
         icon: PlugIcon,
         labelKey: "mcpServices",
         searchKeywordsKey: "mcpServicesSearchKeywords",
+      },
+      {
+        href: "/admin/tools?view=pi-plugins",
+        icon: PackageIcon,
+        labelKey: "piPlugins",
+        searchKeywordsKey: "piPluginsSearchKeywords",
       },
       {
         href: "/admin/models",

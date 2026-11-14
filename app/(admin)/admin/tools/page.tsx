@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { McpServersPage } from "@/components/admin/tools/mcp-servers-page";
+import { PiPackagesPage } from "@/components/admin/tools/pi-packages-page";
 import { Button } from "@/components/ui/button";
 import { requireAdminRole } from "@/lib/admin/access";
 import { listMcpServers } from "@/lib/db/mcp-server-queries";
+import { listPiPackages } from "@/lib/db/pi-package-queries";
 
 /** 非管理员可见的占位说明(MCP 服务配置仅管理员可访问) */
 async function PermissionNotice() {
@@ -44,12 +46,36 @@ async function McpView() {
   return <McpServersPage initialServers={servers} />;
 }
 
-/** 工具管理:MCP 服务(pi 插件视图暂时隐藏,历史 `?view=pi-plugins` 回退到默认 MCP 视图) */
-export default async function ToolsAdminPage() {
+/** Pi 插件管理视图(仅管理后台,requireAdminRole 已在页面入口校验) */
+async function PiPluginsView() {
+  const records = await listPiPackages();
+  const packages = records.map((record) => ({
+    id: record.id,
+    installedSkills: record.installedSkills,
+    name: record.name,
+    resourceSummary: record.resourceSummary,
+    source: record.source,
+    system: record.system,
+    version: record.version,
+  }));
+  return <PiPackagesPage initialPackages={packages} />;
+}
+
+/** 工具管理:MCP 服务(默认)与 Pi 插件(`?view=pi-plugins`)两个视图 */
+export default async function ToolsAdminPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ view?: string | string[] }>;
+}) {
   const session = await requireAdminRole();
   if (!session) {
     return <PermissionNotice />;
   }
 
+  const params = await searchParams;
+  const view = Array.isArray(params.view) ? params.view[0] : params.view;
+  if (view === "pi-plugins") {
+    return <PiPluginsView />;
+  }
   return <McpView />;
 }

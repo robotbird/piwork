@@ -127,7 +127,7 @@ function InstalledPackageRow({
           </Badge>
           {resourceSummary.extensions > 0 ? (
             <Badge className="text-muted-foreground" variant="outline">
-              {t("piPackages.badgeExtensionsPending", {
+              {t("piPackages.badgeExtensions", {
                 count: resourceSummary.extensions,
               })}
             </Badge>
@@ -436,7 +436,7 @@ export function PiPackagesPage({
   );
 
   return (
-    <section className="min-w-0 px-5 py-8 sm:px-8 md:px-10 md:py-14 lg:px-12 lg:py-16">
+    <section className="min-w-0 flex-1 px-5 py-8 sm:px-8 md:px-10 md:py-14 lg:px-12 lg:py-16">
       <div className="mx-auto max-w-[960px]">
         <header>
           <h1 className="text-2xl font-semibold tracking-[-0.025em]">
@@ -446,6 +446,10 @@ export function PiPackagesPage({
             {t("admin.piPluginsDescription")}
           </p>
         </header>
+
+        <p className="mt-4 rounded-[14px] border border-border bg-card px-5 py-3.5 text-[13px] text-muted-foreground">
+          {t("piPackages.extensionSecurityNote")}
+        </p>
 
         <div className="mt-6 overflow-hidden rounded-[14px] border border-border bg-card">
           <div className="border-b border-border px-4 py-3">
