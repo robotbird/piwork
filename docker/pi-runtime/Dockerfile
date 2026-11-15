@@ -36,13 +36,30 @@ RUN npm install --omit=dev --registry="${NPM_REGISTRY}" --prefix /opt/pi "@earen
 # bash 供 pi 内建 bash 工具与 provider 的 dd/cat 契约；git 供 hosted-git-info 类解析按需再加
 RUN apk add --no-cache bash
 
-# Python 工具链 + 预装 python-pptx（"生成 PPT/Office"类执行任务的运行时面）。
-# musl 下 lxml/Pillow 走 apk 预编译包，避免运行时 pip 触发源码编译；pptx 本体
-# 是纯 wheel，XlsxWriter/typing-extensions 由 pip 自动补齐。构建期断言可导入，
-# 镜像缺能力时在 build 阶段即失败而不是等模型在沙箱里撞错。
+# Python 工具链 + 预装 Office/PDF 生成库（文档类执行任务的运行时面）。
+# musl 下 lxml/Pillow 走 apk 预编译包，避免运行时 pip 触发源码编译；其余为
+# 纯 wheel（python-pptx/python-docx/openpyxl/reportlab/pypdf）。
+# 构建期断言可导入，镜像缺能力时在 build 阶段即失败而不是等模型在沙箱里撞错。
 RUN apk add --no-cache python3 py3-pip py3-lxml py3-pillow \
-  && pip install --no-cache-dir --break-system-packages python-pptx \
-  && python3 -c "import lxml, PIL, pptx, xlsxwriter; print('python-pptx', pptx.__version__)"
+  && pip install --no-cache-dir --break-system-packages \
+    python-pptx python-docx openpyxl reportlab pypdf \
+  && python3 -c "import lxml, PIL, pptx, xlsxwriter, docx, openpyxl, reportlab, pypdf; print('python office/pdf toolchain ok')"
+
+# 中文字体（Noto CJK）：中文 PDF/Word 产出的硬前提，缺失时输出全是豆腐块。
+RUN apk add --no-cache font-noto-cjk \
+  && test -f /usr/share/fonts/noto/NotoSansCJK-Regular.ttc
+
+# typst：现代排版 PDF 生成器，官方静态 musl 二进制（无运行时依赖）。
+# 锁定版本保证可复现；升级时更新 TYPST_VERSION。
+ARG TYPST_VERSION=0.15.1
+RUN apk add --no-cache xz \
+  && wget -q -O /tmp/typst.tar.xz \
+    "https://github.com/typst/typst/releases/download/v${TYPST_VERSION}/typst-x86_64-unknown-linux-musl.tar.xz" \
+  && tar -xJf /tmp/typst.tar.xz -C /tmp \
+  && mv "/tmp/typst-x86_64-unknown-linux-musl/typst" /usr/local/bin/typst \
+  && chmod +x /usr/local/bin/typst \
+  && rm -rf /tmp/typst.tar.xz "/tmp/typst-x86_64-unknown-linux-musl" \
+  && typst --version
 
 RUN mkdir -p /workspace \
   && chown -R pi:pi /opt/pi /workspace /home/pi
