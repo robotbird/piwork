@@ -11,6 +11,7 @@ import type {
 import type { PiMessagesEvent } from "@earendil-works/pi-ai/api/pi-messages";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { toPiMessagesEvent } from "./events";
+import type { HostToolsRequestHandler } from "./host-tools";
 import type { RunTokenRegistry } from "./tokens";
 
 /**
@@ -56,6 +57,7 @@ export type InferenceAuditEntry = {
     | "model_ambiguous"
     | "upstream_unavailable"
     | "upstream_error"
+    | "upstream_stalled"
     | "client_aborted";
   inputTokens?: number;
   outputTokens?: number;
@@ -75,6 +77,14 @@ type PiMessagesRequestBody = {
 
 export const DEFAULT_MAX_BODY_BYTES = 32 * 1024 * 1024;
 
+/**
+ * Upstream stall guard: abort the provider stream when no event (not even a
+ * delta) arrives for this long, so a hung upstream call fails fast instead of
+ * pinning the run until an outer timeout. 0 disables the guard. Long thinking
+ * pauses only risk tripping it when they exceed the whole window.
+ */
+export const DEFAULT_UPSTREAM_IDLE_TIMEOUT_MS = 120_000;
+
 export class InferenceProxyServer {
   private readonly server: Server;
   private readonly resolver: UpstreamResolver;
@@ -82,6 +92,8 @@ export class InferenceProxyServer {
   private readonly audit: InferenceAuditSink | undefined;
   private readonly now: () => number;
   private readonly maxBodyBytes: number;
+  private readonly hostTools: HostToolsRequestHandler | undefined;
+  private readonly upstreamIdleTimeoutMs: number;
 
   constructor(options: {
     resolver: UpstreamResolver;
@@ -89,12 +101,20 @@ export class InferenceProxyServer {
     audit?: InferenceAuditSink;
     now?: () => number;
     maxBodyBytes?: number;
+    /** Sandbox Host Tools Bridge: POST /host-tools/<name> delegation.
+     * Absent = the route 404s exactly as before. */
+    hostTools?: HostToolsRequestHandler;
+    /** Abort upstream streams idle for this long (0 = disabled). */
+    upstreamIdleTimeoutMs?: number;
   }) {
     this.resolver = options.resolver;
     this.tokens = options.tokens;
     this.audit = options.audit;
     this.now = options.now ?? Date.now;
     this.maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+    this.hostTools = options.hostTools;
+    this.upstreamIdleTimeoutMs =
+      options.upstreamIdleTimeoutMs ?? DEFAULT_UPSTREAM_IDLE_TIMEOUT_MS;
     this.server = createServer((req, res) => {
       this.handle(req, res).catch(() => {
         // 兜底：handler 内部已尽量自洽，这里防未知异常悬挂连接（审计与
@@ -163,6 +183,10 @@ export class InferenceProxyServer {
     if (req.method === "GET" && url.pathname === "/healthz") {
       res.writeHead(200, { "content-type": "text/plain" });
       res.end("ok");
+      return;
+    }
+    if (this.hostTools && url.pathname.startsWith("/host-tools/")) {
+      await this.hostTools(req, res);
       return;
     }
     if (
@@ -360,7 +384,22 @@ export class InferenceProxyServer {
         abort.abort();
       }
     });
-    upstreamOptions.signal = abort.signal;
+    // 停滞保护：上游 N ms 无任何事件即中止（与断连共用同一 signal 语义）
+    const stallAbort = new AbortController();
+    let stalled = false;
+    let stallTimer: ReturnType<typeof setTimeout> | undefined;
+    const idleMs = this.upstreamIdleTimeoutMs;
+    const armStall = () => {
+      clearTimeout(stallTimer);
+      if (!idleMs) {
+        return;
+      }
+      stallTimer = setTimeout(() => {
+        stalled = true;
+        stallAbort.abort();
+      }, idleMs);
+    };
+    upstreamOptions.signal = AbortSignal.any([abort.signal, stallAbort.signal]);
 
     const startedAt = this.now();
     // 客户端断开后的残余写入不得抛（流已销毁；错误吞掉，断开只经 abort 感知）
@@ -371,6 +410,19 @@ export class InferenceProxyServer {
       connection: "keep-alive",
       "content-type": "text/event-stream",
     });
+    const syntheticError = (errorMessage: string): PiMessagesEvent => ({
+      errorMessage,
+      reason: "error",
+      type: "error",
+      usage: {
+        cacheRead: 0,
+        cacheWrite: 0,
+        cost: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0, total: 0 },
+        input: 0,
+        output: 0,
+        totalTokens: 0,
+      },
+    });
     let terminal: "done" | "error" | null = null;
     let usage: { input: number; output: number } | undefined;
     try {
@@ -379,7 +431,9 @@ export class InferenceProxyServer {
         transcript,
         upstreamOptions as Parameters<Provider["stream"]>[2]
       );
+      armStall();
       for await (const event of stream) {
+        armStall();
         const wireEvent = toPiMessagesEvent(event);
         if (wireEvent && !res.destroyed) {
           res.write(`data: ${JSON.stringify(wireEvent)}\n\n`);
@@ -393,26 +447,31 @@ export class InferenceProxyServer {
       }
     } catch {
       terminal ??= "error";
+      // 官方客户端把「流无终态结束」当硬错误；异常路径同样补发 error 事件
+      if (!res.destroyed) {
+        res.write(
+          `data: ${JSON.stringify(
+            syntheticError(
+              stalled
+                ? `upstream stalled: no events for ${idleMs}ms`
+                : "upstream stream failed"
+            )
+          )}\n\n`
+        );
+      }
+    } finally {
+      clearTimeout(stallTimer);
     }
     if (terminal === null) {
       // 客户端契约：流必须以终态事件结束（"stream ended without a
       // terminal event" 是官方客户端的硬错误），上游违约时补发 error
       terminal = "error";
-      const synthetic: PiMessagesEvent = {
-        errorMessage: "upstream stream ended without a terminal event",
-        reason: "error",
-        type: "error",
-        usage: {
-          cacheRead: 0,
-          cacheWrite: 0,
-          cost: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0, total: 0 },
-          input: 0,
-          output: 0,
-          totalTokens: 0,
-        },
-      };
       if (!res.destroyed) {
-        res.write(`data: ${JSON.stringify(synthetic)}\n\n`);
+        res.write(
+          `data: ${JSON.stringify(
+            syntheticError("upstream stream ended without a terminal event")
+          )}\n\n`
+        );
       }
     }
     res.end();
@@ -422,9 +481,11 @@ export class InferenceProxyServer {
       durationMs: this.now() - startedAt,
       errorCode:
         terminal === "error"
-          ? abort.signal.aborted
-            ? "client_aborted"
-            : "upstream_error"
+          ? stalled
+            ? "upstream_stalled"
+            : abort.signal.aborted
+              ? "client_aborted"
+              : "upstream_error"
           : undefined,
       inputTokens: usage?.input,
       model: modelId,

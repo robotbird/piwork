@@ -37,6 +37,7 @@ type Booted = {
 async function boot(options?: {
   maxBodyBytes?: number;
   resolver?: UpstreamResolver;
+  upstreamIdleTimeoutMs?: number;
 }): Promise<Booted> {
   const audit: InferenceAuditEntry[] = [];
   const tokens = new RunTokenRegistry();
@@ -51,6 +52,9 @@ async function boot(options?: {
     ...(options?.maxBodyBytes === undefined
       ? {}
       : { maxBodyBytes: options.maxBodyBytes }),
+    ...(options?.upstreamIdleTimeoutMs === undefined
+      ? {}
+      : { upstreamIdleTimeoutMs: options.upstreamIdleTimeoutMs }),
   });
   const { url } = await server.listen();
   return {
@@ -335,6 +339,52 @@ test("上游违约（无终态事件）：合成官方 error 事件收尾 + upst
     await waitForAudit(proxy.audit, 1);
     assert.equal(proxy.audit[0].status, "error");
     assert.equal(proxy.audit[0].errorCode, "upstream_error");
+  } finally {
+    await proxy.close();
+  }
+});
+
+test("上游停滞（空闲超时无事件）：中止上游并补发 error，审计记 upstream_stalled", async () => {
+  const stalled: UpstreamResolver = () => ({
+    model: {} as Model<Api>,
+    provider: {
+      stream(_model: unknown, _context: unknown, options: unknown) {
+        const signal = (options as { signal?: AbortSignal } | undefined)
+          ?.signal;
+        return (async function* streamEvents() {
+          yield { partial: { content: [] }, type: "start" };
+          // 产出首帧后挂起：模拟上游挂死（DashScope 限流排队场景）
+          await new Promise((_, reject) => {
+            if (signal?.aborted) {
+              reject(new Error("aborted"));
+              return;
+            }
+            signal?.addEventListener("abort", () =>
+              reject(new Error("aborted"))
+            );
+          });
+        })();
+      },
+    } as unknown as Provider,
+  });
+  const proxy = await boot({
+    resolver: stalled,
+    upstreamIdleTimeoutMs: 80,
+  });
+  try {
+    const result = await post(proxy.url, validBody(), proxy.mint());
+    assert.equal(result.status, 200);
+    const events = parseSse(result.text);
+    assert.equal(events[0]?.type, "start");
+    const last = events.at(-1);
+    assert.equal(last?.type, "error");
+    if (last.type === "error") {
+      assert.ok(last.errorMessage, "expected an error message");
+      assert.match(last.errorMessage, /upstream stalled/);
+    }
+    await waitForAudit(proxy.audit, 1);
+    assert.equal(proxy.audit[0].status, "error");
+    assert.equal(proxy.audit[0].errorCode, "upstream_stalled");
   } finally {
     await proxy.close();
   }
