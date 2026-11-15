@@ -4,6 +4,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { type FileHandle, open, opendir, realpath } from "node:fs/promises";
+import { platform as osPlatform } from "node:os";
 import path from "node:path";
 import { parseFrontmatter, type Skill } from "@earendil-works/pi-coding-agent";
 import { forEachSkillFile } from "@/lib/ai/skill-file-operations";
@@ -43,12 +44,13 @@ export async function snapshotSandboxSkills(
   if (!skills.length) {
     return [];
   }
-  const linux = process.platform === "linux";
+  // os.platform() stays a runtime call in the bundle; a bare process.platform
+  // comparison gets constant-folded to the BUILD machine's platform by the
+  // server bundler and then throws linux-required on the Linux host.
+  const linux = osPlatform() === "linux";
   if (
     !linux &&
-    !(
-      process.platform === "darwin" && process.env.NODE_ENV === "development"
-    ) &&
+    !(osPlatform() === "darwin" && process.env.NODE_ENV === "development") &&
     !(options.allowNonLinuxForTests && process.env.NODE_ENV === "test")
   ) {
     throw new Error("runtime:sandbox-skills:linux-required");

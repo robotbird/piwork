@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { platform as osPlatform } from "node:os";
 import { promisify } from "node:util";
 import {
   SKILL_ENV_EXAMPLE_MAX_BYTES,
@@ -65,7 +66,9 @@ export async function collectSkillsInLinux(
   names: string[],
   image: string
 ) {
-  if (process.platform !== "darwin" || process.env.NODE_ENV !== "development") {
+  // Runtime platform check: process.platform comparisons are folded to the
+  // BUILD machine's value by the server bundler (see snapshotSandboxSkills).
+  if (osPlatform() !== "darwin" || process.env.NODE_ENV !== "development") {
     throw new Error("runtime:sandbox-skills:linux-required");
   }
   if (root.includes(",") || !image || image.startsWith("-")) {
