@@ -80,15 +80,16 @@ export function publicSourceUrl(value: unknown): string | undefined {
  *
  * Two producers are recognized:
  * - `platform_web_search` (piwork): the bounded `details.sources` projection.
- * - pi-web-access `web_search`: the plugin's `### title\n<url>` text regions
- *   re-parsed by extractSearchSources; anything else is dropped.
+ * - pi-web-access `web_search`: the plugin's `structuredContent` results
+ *   (title/url/snippet) first, with the result-text regions parsed by
+ *   extractSearchSources as fallback; anything else is dropped.
  */
 export function searchSources(
   toolName: string,
   result: unknown
 ): SearchSource[] {
   if (toolName === PI_WEB_ACCESS_SEARCH_TOOL) {
-    return extractSearchSources(toolResultText(result));
+    return pluginSearchSources(result);
   }
   if (toolName !== WEB_SEARCH_TOOL || !result || typeof result !== "object") {
     return [];
@@ -153,22 +154,89 @@ export function toolResultText(result: unknown): string {
     .join("\n");
 }
 
-/** Bounded extraction from the pi-web-access `### title\n<url>` result regions. */
+/** Bounded extraction from pi-web-access result text regions.
+ * Supports both textual presentations the plugin emits:
+ * - inline search summary: `N. title\n   <url>` numbered list
+ * - stored full results: `### title\n<url>` heading regions
+ */
 export function extractSearchSources(text: string): SearchSource[] {
   const sources: SearchSource[] = [];
   const seen = new Set<string>();
-  const pattern = /^### (.+)$\n^(https?:\/\/\S+)$/gm;
-  for (const match of text.matchAll(pattern)) {
-    const title = match[1]?.trim().slice(0, 250);
-    const url = publicSourceUrl(match[2] ?? "");
+  const push = (titleRaw: string | undefined, urlRaw: string | undefined) => {
+    const title = titleRaw?.trim().slice(0, 250);
+    const url = publicSourceUrl(urlRaw ?? "");
     if (!title || !url || seen.has(url)) {
-      continue;
+      return;
     }
     seen.add(url);
     sources.push({ publishedAt: null, snippet: "", title, url });
+  };
+  for (const match of text.matchAll(
+    /^\d+\. (.+)$\n^[ \t]+(https?:\/\/\S+)$/gm
+  )) {
+    push(match[1], match[2]);
+    if (sources.length >= 8) {
+      return sources;
+    }
+  }
+  for (const match of text.matchAll(/^### (.+)$\n^(https?:\/\/\S+)$/gm)) {
+    push(match[1], match[2]);
     if (sources.length >= 8) {
       break;
     }
+  }
+  return sources;
+}
+
+type PluginStructuredContent = {
+  structuredContent?: {
+    queries?: Array<{
+      results?: Array<{
+        title?: unknown;
+        url?: unknown;
+        snippet?: unknown;
+      }>;
+    }>;
+  };
+};
+
+/** pi-web-access web_search: structured results first, text regions as fallback. */
+function pluginSearchSources(result: unknown): SearchSource[] {
+  const sources: SearchSource[] = [];
+  const seen = new Set<string>();
+  if (result && typeof result === "object") {
+    const queries = (result as PluginStructuredContent).structuredContent
+      ?.queries;
+    if (Array.isArray(queries)) {
+      for (const query of queries) {
+        for (const item of Array.isArray(query?.results)
+          ? (query.results as Array<Record<string, unknown>>)
+          : []) {
+          const url = publicSourceUrl(item.url);
+          const title =
+            typeof item.title === "string" ? item.title.trim().slice(0, 250) : "";
+          if (!url || !title || seen.has(url)) {
+            continue;
+          }
+          seen.add(url);
+          sources.push({
+            publishedAt: null,
+            snippet:
+              typeof item.snippet === "string"
+                ? item.snippet.slice(0, 300)
+                : "",
+            title,
+            url,
+          });
+          if (sources.length >= 8) {
+            return sources;
+          }
+        }
+      }
+    }
+  }
+  if (sources.length === 0) {
+    return extractSearchSources(toolResultText(result));
   }
   return sources;
 }

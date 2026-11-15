@@ -182,16 +182,21 @@ test("failed or third-party tool results cannot emit search source events", () =
   }
 });
 
-test("pi-web-access web_search text results project into replayable source cards", () => {
+test("pi-web-access web_search structuredContent projects into replayable source cards", () => {
   const events = new PiEventNormalizer().feed({
     isError: false,
     result: {
-      content: [
-        {
-          text: '## Results for: "pi agent"\n\n### Pi Coding Agent\nhttps://pi.dev/\n\nintro text\n\n### Release v1.5.0\nhttps://github.com/earendil-works/pi/releases/tag/v1.5.0\n',
-          type: "text",
-        },
-      ],
+      content: [{ text: "presentation text", type: "text" }],
+      structuredContent: {
+        queries: [
+          {
+            results: [
+              { snippet: "terminal coding agent", title: "Pi Coding Agent", url: "https://pi.dev/" },
+              { snippet: "release notes", title: "Release v1.5.0", url: "https://github.com/earendil-works/pi/releases/tag/v1.5.0" },
+            ],
+          },
+        ],
+      },
     },
     toolCallId: "ws1",
     toolName: "web_search",
@@ -201,23 +206,41 @@ test("pi-web-access web_search text results project into replayable source cards
     events.map((event) =>
       event.type === "source.created" ? event.url : event.type
     ),
-    [
-      "tool.completed",
-      "https://pi.dev/",
-      "https://github.com/earendil-works/pi/releases/tag/v1.5.0",
-    ]
+    ["tool.completed", "https://pi.dev/", "https://github.com/earendil-works/pi/releases/tag/v1.5.0"]
   );
-  // Same data-web-source shape on the wire and in the persisted parts
-  const source = events.at(-1);
-  assert.ok(source && source.type === "source.created");
-  assert.deepEqual(runtimeEventToUIMessageChunks(source), [
+  // Snippet rides along into the wire chunk (and the persisted part)
+  assert.deepEqual(runtimeEventToUIMessageChunks(events[1]), [
     {
       data: {
-        sourceId: "ws1-source-1",
-        title: "Release v1.5.0",
-        url: "https://github.com/earendil-works/pi/releases/tag/v1.5.0",
+        snippet: "terminal coding agent",
+        sourceId: "ws1-source-0",
+        title: "Pi Coding Agent",
+        url: "https://pi.dev/",
       },
       type: "data-web-source",
     },
   ]);
+});
+
+test("pi-web-access web_search numbered text fallback still yields source cards", () => {
+  const events = new PiEventNormalizer().feed({
+    isError: false,
+    result: {
+      content: [
+        {
+          text: 'Answer paragraph.\n\n---\n\n**Sources:**\n1. Pi Coding Agent\n   https://pi.dev/\n\n2. Release v1.5.0\n   https://github.com/earendil-works/pi/releases/tag/v1.5.0\n',
+          type: "text",
+        },
+      ],
+    },
+    toolCallId: "ws2",
+    toolName: "web_search",
+    type: "tool_execution_end",
+  });
+  assert.deepEqual(
+    events.map((event) =>
+      event.type === "source.created" ? event.url : event.type
+    ),
+    ["tool.completed", "https://pi.dev/", "https://github.com/earendil-works/pi/releases/tag/v1.5.0"]
+  );
 });
