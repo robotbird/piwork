@@ -91,7 +91,8 @@ test("successful search metadata becomes replayable RuntimeEvent and identical w
       details: {
         sources: [
           {
-            publishedAt: null,
+            publishedAt: "2026-11-01",
+            snippet: "bounded snippet",
             title: "News",
             url: "https://news.example.org/a",
           },
@@ -107,15 +108,54 @@ test("successful search metadata becomes replayable RuntimeEvent and identical w
   const [, source] = events;
   assert.equal(source.type, "source.created");
   assert.equal(isPersistedRuntimeEvent(source), true);
+  // Rich source card fields survive the event → wire chunk → DB part pipeline
   const expected = {
-    sourceId: "search1-source-0",
-    title: "News",
-    type: "source-url",
-    url: "https://news.example.org/a",
+    data: {
+      publishedAt: "2026-11-01",
+      snippet: "bounded snippet",
+      sourceId: "search1-source-0",
+      title: "News",
+      url: "https://news.example.org/a",
+    },
+    type: "data-web-source",
   };
   assert.deepEqual(runtimeEventToUIMessageChunks(source), [expected]);
   assert.deepEqual(buildAssistantMessageParts([source, source]), [expected]);
   assert.ok(!JSON.stringify(source).includes("not persisted"));
+});
+
+test("empty snippet fields are omitted from the source card, not stored as blanks", () => {
+  const normalizer = new PiEventNormalizer();
+  const events = normalizer.feed({
+    isError: false,
+    result: {
+      content: [],
+      details: {
+        sources: [{ title: "News", url: "https://news.example.org/a" }],
+      },
+    },
+    toolCallId: "search1",
+    toolName: WEB_SEARCH_TOOL,
+    type: "tool_execution_end",
+  });
+  const source = events.at(-1);
+  assert.ok(source && source.type === "source.created");
+  const [chunk] = runtimeEventToUIMessageChunks(source);
+  if (chunk.type !== "data-web-source") {
+    assert.fail(`expected data-web-source chunk, got ${chunk.type}`);
+  }
+  assert.ok(!("snippet" in chunk.data));
+  assert.ok(!("publishedAt" in chunk.data));
+  assert.deepEqual(buildAssistantMessageParts([source]), [
+    {
+      data: {
+        sourceId: "search1-source-0",
+        title: "News",
+        url: "https://news.example.org/a",
+      },
+      type: "data-web-source",
+    },
+  ]);
 });
 
 test("failed or third-party tool results cannot emit search source events", () => {

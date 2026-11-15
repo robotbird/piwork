@@ -80,8 +80,19 @@ export type RuntimeEvent =
       toolName: string;
       isError: boolean;
     }
-  /** Public source metadata only; no provider payload, query, credentials or HTML. */
-  | { type: "source.created"; sourceId: string; title: string; url: string }
+  /**
+   * Public source metadata only; no provider payload, query, credentials or HTML.
+   * snippet/publishedAt are display-only rich fields for source cards; only new
+   * events carry them — historical events render without a snippet.
+   */
+  | {
+      type: "source.created";
+      sourceId: string;
+      title: string;
+      url: string;
+      snippet?: string;
+      publishedAt?: string | null;
+    }
   | { type: "artifact.created"; file: RuntimeArtifact }
   | {
       type: "queue.changed";

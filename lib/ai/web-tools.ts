@@ -29,11 +29,14 @@ export function createWebSearchTool(
           },
         ],
         details: {
-          sources: response.results.map(({ title, url, publishedAt }) => ({
-            publishedAt,
-            title,
-            url,
-          })),
+          sources: response.results.map(
+            ({ publishedAt, snippet, title, url }) => ({
+              publishedAt,
+              snippet,
+              title,
+              url,
+            })
+          ),
         },
       };
     },

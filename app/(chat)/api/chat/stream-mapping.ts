@@ -100,12 +100,19 @@ export function runtimeEventToUIMessageChunks(
   }
 
   if (event.type === "source.created") {
+    // Non-transient and id-less: the SDK appends it to message parts and
+    // persists on end (same as data-delivered-file). data-web-source carries
+    // the rich source card fields.
     return [
       {
-        sourceId: event.sourceId,
-        title: event.title,
-        type: "source-url",
-        url: event.url,
+        data: {
+          ...(event.publishedAt ? { publishedAt: event.publishedAt } : {}),
+          ...(event.snippet ? { snippet: event.snippet } : {}),
+          sourceId: event.sourceId,
+          title: event.title,
+          url: event.url,
+        },
+        type: "data-web-source",
       },
     ];
   }

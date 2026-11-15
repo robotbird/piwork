@@ -6,6 +6,7 @@ import type { getWeather } from "./ai/tools/get-weather";
 import type { requestSuggestions } from "./ai/tools/request-suggestions";
 import type { updateDocument } from "./ai/tools/update-document";
 import type { Suggestion } from "./db/schema";
+import type { WebSourceData } from "./search/protocol";
 
 export const messageMetadataSchema = z.object({
   createdAt: z.string(),
@@ -67,6 +68,8 @@ export type CustomUIDataTypes = {
   "waiting-status": WaitingStatusData;
   "tool-status": ToolStatusData;
   "delivered-file": DeliveredFileData;
+  /** Rich source card for web search results: favicon/domain/title/snippet */
+  "web-source": WebSourceData;
   /** (runId, seq) 游标：transient 直传，客户端存内存 ref 供断线重连 */
   "runtime-cursor": RuntimeCursorData;
   "reasoning-timing": ReasoningTimingData;

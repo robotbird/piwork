@@ -139,6 +139,8 @@ export class PiEventNormalizer {
             ? []
             : searchSources(event.toolName, event.result).map(
                 (source, index): RuntimeEvent => ({
+                  publishedAt: source.publishedAt,
+                  snippet: source.snippet,
                   sourceId: `${event.toolCallId}-source-${index}`,
                   title: source.title,
                   type: "source.created",

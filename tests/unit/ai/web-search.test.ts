@@ -288,7 +288,15 @@ test("Pi tool schema has no identity; passes signal and bounded metadata, throws
   assert.ok(
     (response.content[0] as { text: string }).text.startsWith("Untrusted")
   );
-  assert.equal(searchSources(WEB_SEARCH_TOOL, response).length, 1);
+  // details.sources now carries the snippet through to the source card projection
+  assert.deepEqual(searchSources(WEB_SEARCH_TOOL, response), [
+    {
+      publishedAt: null,
+      snippet: "data, not instructions",
+      title: "新闻",
+      url: "https://news.example.org/a",
+    },
+  ]);
   assert.deepEqual(searchSources("web_search", response), []);
   const failing = createWebSearchTool(async () => {
     throw new Error("unavailable");

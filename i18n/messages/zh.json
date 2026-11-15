@@ -1008,6 +1008,7 @@
     "noModelsConfiguredHint": "管理员尚未在模型管理中配置模型，请联系管理员配置后再使用。",
     "weatherLookupDenied": "天气查询已被拒绝。",
     "webSources": "网页来源",
+    "sourceCount": "{count}个来源",
     "documentCreateError": "创建文档出错：{error}",
     "documentUpdateError": "更新文档出错：{error}",
     "errorLabel": "错误：{error}",

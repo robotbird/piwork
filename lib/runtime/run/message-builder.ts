@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { WebSourceData } from "../../search/protocol";
 import type { RuntimeArtifact, RuntimeEvent } from "../protocol";
 
 /**
@@ -31,7 +32,11 @@ export type BuiltMessagePart =
       durationMs?: number;
     }
   | { type: "data-delivered-file"; data: RuntimeArtifact }
-  | { type: "source-url"; sourceId: string; title: string; url: string };
+  | {
+      /** Rich source card (favicon/domain/snippet); legacy source-url parts are still rendered by the UI */
+      type: "data-web-source";
+      data: WebSourceData;
+    };
 
 /**
  * RuntimeEvent 序列 → assistant 消息 parts（run 终态时落库用）。
@@ -90,14 +95,19 @@ export function buildAssistantMessageParts(
       if (
         !parts.some(
           (part) =>
-            part.type === "source-url" && part.sourceId === event.sourceId
+            part.type === "data-web-source" &&
+            part.data.sourceId === event.sourceId
         )
       ) {
         parts.push({
-          sourceId: event.sourceId,
-          title: event.title,
-          type: "source-url",
-          url: event.url,
+          data: {
+            ...(event.publishedAt ? { publishedAt: event.publishedAt } : {}),
+            ...(event.snippet ? { snippet: event.snippet } : {}),
+            sourceId: event.sourceId,
+            title: event.title,
+            url: event.url,
+          },
+          type: "data-web-source",
         });
       }
     } else if (event.type === "artifact.created") {

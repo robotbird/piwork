@@ -7,7 +7,6 @@ import { useActiveChat } from "@/hooks/use-active-chat";
 import { isChatFileUrl } from "@/lib/ai/attachment-types";
 import { formatToolStatus } from "@/lib/chat/tool-status";
 import type { Vote } from "@/lib/db/schema";
-import { publicSourceUrl } from "@/lib/search/protocol";
 import type { ChatMessage } from "@/lib/types";
 import { cn, sanitizeText } from "@/lib/utils";
 import { MessageContent, MessageResponse } from "../ai-elements/message";
@@ -28,6 +27,7 @@ import {
   MessageReasoning,
   type ReasoningPartWithTiming,
 } from "./message-reasoning";
+import { collectSources, MessageSources } from "./message-sources";
 import { PreviewAttachment } from "./preview-attachment";
 import { TextAttachmentPreview } from "./text-attachment-preview";
 import { UserAvatar } from "./user-avatar";
@@ -185,7 +185,8 @@ const PurePreviewMessage = ({
     (part) =>
       (part.type === "text" && part.text?.trim().length > 0) ||
       part.type.startsWith("tool-") ||
-      part.type === "source-url"
+      part.type === "source-url" ||
+      part.type === "data-web-source"
   );
   const isThinking = isAssistant && isLoading && !hasAnyContent;
 
@@ -423,21 +424,11 @@ const PurePreviewMessage = ({
     return null;
   });
 
-  const sources = isAssistant
-    ? [
-        ...new Map(
-          message.parts.flatMap((part) => {
-            if (part.type !== "source-url") {
-              return [];
-            }
-            const url = publicSourceUrl(part.url);
-            return url
-              ? [[url, { title: part.title || url, url }] as const]
-              : [];
-          })
-        ).values(),
-      ]
-    : [];
+  // Web search sources (chip + expandable list); only assistant messages carry source parts
+  const sourcesPanel =
+    isAssistant && collectSources(message.parts).length > 0 ? (
+      <MessageSources key={`sources-${message.id}`} parts={message.parts} />
+    ) : null;
 
   const actions = !isReadonly && (
     <MessageActions
@@ -460,29 +451,7 @@ const PurePreviewMessage = ({
       {attachments}
       {reasoningPanel}
       {parts}
-      {sources.length > 0 ? (
-        <section
-          aria-label={t("webSources")}
-          className="rounded-lg border p-3 text-sm"
-          data-testid="web-search-sources"
-        >
-          <p className="mb-2 font-medium">{t("webSources")}</p>
-          <ul className="space-y-1.5">
-            {sources.map((source) => (
-              <li className="min-w-0" key={source.url}>
-                <a
-                  className="break-words text-primary underline underline-offset-4"
-                  href={source.url}
-                  rel="noopener noreferrer"
-                  target="_blank"
-                >
-                  {source.title}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+      {sourcesPanel}
       {isAssistant && isLoading ? <ToolStatusText /> : null}
       {actions}
     </>
