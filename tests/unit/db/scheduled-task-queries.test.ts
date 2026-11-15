@@ -114,3 +114,20 @@ test("createTaskForUser: 同一消息同参数跨 run 幂等；参数变化/换�
   assert.notEqual(theirs.id, first.id);
 });
 
+test("claim lease 覆盖执行预算（≥ 超时+5 分钟余量），防 recover 误杀重跑循环", async () => {
+  const id = crypto.randomUUID();
+  await createScheduledTask(owner, input, id);
+  await sql`UPDATE "ScheduledTask" SET "nextRunAt" = ${new Date(Date.now() - 60_000).toISOString()}::timestamp WHERE id = ${id}`;
+  const claimed = await claimScheduledTask(owner, id);
+  assert.ok(claimed);
+  const leaseMs =
+    new Date(claimed.lockedUntil as unknown as string).getTime() -
+    Date.now();
+  assert.ok(
+    leaseMs >= 19 * 60_000,
+    `lease=${Math.round(leaseMs / 60_000)}min 应 ≥ 任务预算(15min)+余量(5min)——短于预算会被 recoverExpiredTasks 误杀并循环重跑`
+  );
+  // 原有 10 分钟硬编码曾导致生产无限重跑（2026-11-15 事故）
+  await sql`DELETE FROM "ScheduledTask" WHERE id = ${id}`;
+});
+

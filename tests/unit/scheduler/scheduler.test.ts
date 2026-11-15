@@ -89,6 +89,37 @@ function handle(settled: Promise<SettleOutcome>): RunHandle {
     runId: "run",
   };
 }
+test("default task timeout is env-configurable (PIWORK_SCHEDULED_TASK_TIMEOUT_MS)", async () => {
+  const previous = process.env.PIWORK_SCHEDULED_TASK_TIMEOUT_MS;
+  try {
+    process.env.PIWORK_SCHEDULED_TASK_TIMEOUT_MS = "20";
+    await assert.rejects(
+      waitForTaskCompletion(
+        handle(
+          new Promise(() => {
+            /* Deliberately never settles. */
+          })
+        )
+      ),
+      /超时/
+    );
+    delete process.env.PIWORK_SCHEDULED_TASK_TIMEOUT_MS;
+    // Invalid values fall back to the built-in default instead of breaking.
+    process.env.PIWORK_SCHEDULED_TASK_TIMEOUT_MS = "not-a-number";
+    const deferred = Promise.withResolvers<SettleOutcome>();
+    const waiting = waitForTaskCompletion(handle(deferred.promise));
+    await new Promise((resolve) => setImmediate(resolve));
+    deferred.resolve("settled");
+    await waiting;
+  } finally {
+    if (previous === undefined) {
+      delete process.env.PIWORK_SCHEDULED_TASK_TIMEOUT_MS;
+    } else {
+      process.env.PIWORK_SCHEDULED_TASK_TIMEOUT_MS = previous;
+    }
+  }
+});
+
 test("starting a run is not completion; failure and timeout are not success", async () => {
   const deferred = Promise.withResolvers<SettleOutcome>();
   let done = false;

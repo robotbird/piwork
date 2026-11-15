@@ -2,6 +2,7 @@ import { LocalizedError, translateMessage } from "@/lib/i18n/messages";
 import "server-only";
 import { and, desc, eq, isNull, lte, ne, or } from "drizzle-orm";
 import { getNextRunTime } from "@/lib/scheduler/cron-utils";
+import { scheduledTaskTimeoutMs } from "@/lib/scheduler/completion";
 import { type TaskInput, taskInputSchema } from "@/lib/scheduler/validation";
 import { getDb } from "./client";
 import {
@@ -13,6 +14,15 @@ import {
 const db = getDb();
 const owned = (userId: string, id: string) =>
   and(eq(scheduledTask.id, id), eq(scheduledTask.userId, userId));
+
+/** Execution lease must outlive the task budget (plus settlement headroom):
+ * a lease shorter than the timeout makes recoverExpiredTasks kill healthy
+ * runs and re-claim them in a loop (production incident 2026-11-15). */
+const LEASE_HEADROOM_MS = 5 * 60_000;
+
+export function taskLeaseMs(): number {
+  return scheduledTaskTimeoutMs() + LEASE_HEADROOM_MS;
+}
 
 export async function createScheduledTask(
   userId: string,
@@ -141,7 +151,7 @@ export function claimScheduledTask(
         errorMessage: null,
         lastRunAt: now,
         leaseToken: token,
-        lockedUntil: new Date(now.getTime() + 10 * 60_000),
+        lockedUntil: new Date(now.getTime() + taskLeaseMs()),
         status: "running",
         updatedAt: now,
       })

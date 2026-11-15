@@ -70,4 +70,5 @@ export function startScheduler() {
     return;
   }
   scope[key] = createSchedulerLoop(processDueTasks);
+  console.info("[scheduler] polling loop started (interval 30s)");
 }
