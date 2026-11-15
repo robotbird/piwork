@@ -197,6 +197,13 @@
       "when": 1794225580936,
       "tag": "0027_desktop_browser_login",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1794737183969,
+      "tag": "0028_scheduled_task_timestamptz",
+      "breakpoints": true
     }
   ]
 }

@@ -732,7 +732,10 @@ export const scheduledTask = pgTable(
     chatId: uuid("chatId").references(() => chat.id, {
       onDelete: "set null",
     }),
-    createdAt: timestamp("createdAt").notNull().defaultNow(),
+    // timestamptz（0028）：绝对时刻——SQL now() 与应用 Date 写入语义一致
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     enabled: boolean("enabled").notNull().default(true),
     /** 错误信息（失败时） */
     errorMessage: text("errorMessage"),
@@ -740,11 +743,11 @@ export const scheduledTask = pgTable(
     /** 最近一次运行的结果摘要 */
     lastResult: text("lastResult"),
     /** 上次运行时间 */
-    lastRunAt: timestamp("lastRunAt"),
+    lastRunAt: timestamp("lastRunAt", { withTimezone: true }),
     leaseToken: uuid("leaseToken"),
-    lockedUntil: timestamp("lockedUntil"),
+    lockedUntil: timestamp("lockedUntil", { withTimezone: true }),
     /** 下次计划运行时间 */
-    nextRunAt: timestamp("nextRunAt"),
+    nextRunAt: timestamp("nextRunAt", { withTimezone: true }),
     /** AI 执行提示词 */
     prompt: text("prompt").notNull(),
     /** 调度配置：{ cron: string, timezone?: string } */
@@ -762,7 +765,9 @@ export const scheduledTask = pgTable(
       .default("pending"),
     /** 任务类型：daily_digest, weekly_report, custom 等 */
     taskType: varchar("taskType", { length: 64 }).notNull(),
-    updatedAt: timestamp("updatedAt").notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     /** 任务所有者 */
     userId: uuid("userId")
       .notNull()
@@ -782,9 +787,11 @@ export const scheduledTaskRun = pgTable(
   {
     chatId: uuid("chatId").references(() => chat.id, { onDelete: "set null" }),
     errorMessage: text("errorMessage"),
-    finishedAt: timestamp("finishedAt"),
-    id: uuid("id").primaryKey().notNull(),
-    startedAt: timestamp("startedAt").notNull().defaultNow(),
+    finishedAt: timestamp("finishedAt", { withTimezone: true }),
+    id: uuid("id").primaryKey(),
+    startedAt: timestamp("startedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     status: varchar("status", {
       enum: ["running", "succeeded", "failed"],
     }).notNull(),
@@ -857,8 +864,8 @@ export const desktopSyncState = pgTable("DesktopSyncState", {
 
 /** Short-lived, PKCE-bound grants; only hashes of authorization codes are stored. */
 export const desktopLoginGrant = pgTable("DesktopLoginGrant", {
-  codeHash: varchar("codeHash", { length: 43 }).primaryKey(),
   challenge: varchar("challenge", { length: 43 }).notNull(),
+  codeHash: varchar("codeHash", { length: 43 }).primaryKey(),
   expiresAt: timestamp("expiresAt").notNull(),
   userId: uuid("userId")
     .notNull()

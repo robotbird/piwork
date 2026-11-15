@@ -131,3 +131,13 @@ test("claim lease 覆盖执行预算（≥ 超时+5 分钟余量），防 recove
   await sql`DELETE FROM "ScheduledTask" WHERE id = ${id}`;
 });
 
+test("时区一致性：SQL now() 写入的 nextRunAt 与应用比较语义一致（timestamptz 回归）", async () => {
+  const id = crypto.randomUUID();
+  await createScheduledTask(owner, input, id);
+  // SQL 端写入（会话时区无关的绝对时刻）——迁移前这里会写成 CST 字面量，
+  // 比应用 now() 晚 8 小时导致调度器静默忽略（2026-11-15 生产事故）
+  await sql`UPDATE "ScheduledTask" SET "nextRunAt" = now() - interval '1 minute' WHERE id = ${id}`;
+  const claimed = await claimScheduledTask(owner, id);
+  assert.ok(claimed, "SQL now() 写入的 due 任务应能被应用领取");
+  await sql`DELETE FROM "ScheduledTask" WHERE id = ${id}`;
+});
