@@ -2,10 +2,10 @@ import "../../support/runtime-env";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { HostToolsError } from "@/lib/runtime/inference-proxy/host-tools";
+import { extractSearchSources } from "@/lib/search/protocol";
 import {
   createWebSearchExecutor,
   createWebSearchHostTool,
-  extractSearchSources,
 } from "@/lib/web-access/host-tool";
 import type { ClientBundle } from "@/lib/web-access/mcp-host";
 import { WebAccessService } from "@/lib/web-access/mcp-host";

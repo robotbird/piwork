@@ -161,7 +161,7 @@ test("empty snippet fields are omitted from the source card, not stored as blank
 test("failed or third-party tool results cannot emit search source events", () => {
   for (const [toolName, isError] of [
     [WEB_SEARCH_TOOL, true],
-    ["web_search", false],
+    ["webfetch", false],
   ] as const) {
     const events = new PiEventNormalizer().feed({
       isError,
@@ -180,4 +180,44 @@ test("failed or third-party tool results cannot emit search source events", () =
       ["tool.completed"]
     );
   }
+});
+
+test("pi-web-access web_search text results project into replayable source cards", () => {
+  const events = new PiEventNormalizer().feed({
+    isError: false,
+    result: {
+      content: [
+        {
+          text: '## Results for: "pi agent"\n\n### Pi Coding Agent\nhttps://pi.dev/\n\nintro text\n\n### Release v1.5.0\nhttps://github.com/earendil-works/pi/releases/tag/v1.5.0\n',
+          type: "text",
+        },
+      ],
+    },
+    toolCallId: "ws1",
+    toolName: "web_search",
+    type: "tool_execution_end",
+  });
+  assert.deepEqual(
+    events.map((event) =>
+      event.type === "source.created" ? event.url : event.type
+    ),
+    [
+      "tool.completed",
+      "https://pi.dev/",
+      "https://github.com/earendil-works/pi/releases/tag/v1.5.0",
+    ]
+  );
+  // Same data-web-source shape on the wire and in the persisted parts
+  const source = events.at(-1);
+  assert.ok(source && source.type === "source.created");
+  assert.deepEqual(runtimeEventToUIMessageChunks(source), [
+    {
+      data: {
+        sourceId: "ws1-source-1",
+        title: "Release v1.5.0",
+        url: "https://github.com/earendil-works/pi/releases/tag/v1.5.0",
+      },
+      type: "data-web-source",
+    },
+  ]);
 });

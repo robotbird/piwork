@@ -10,7 +10,7 @@ import {
   HostToolsError,
 } from "@/lib/runtime/inference-proxy/host-tools";
 import {
-  publicSourceUrl,
+  extractSearchSources,
   type SearchInput,
   type SearchSource,
   searchInputSchema,
@@ -69,26 +69,6 @@ function reserveRunBudget(runId: string): void {
     throw new LocalizedError("runtimeMessages.searchRateLimit");
   }
   entry.count += 1;
-}
-
-/** Bounded extraction from the plugin's `### title\n<url>` result regions. */
-export function extractSearchSources(text: string): SearchSource[] {
-  const sources: SearchSource[] = [];
-  const seen = new Set<string>();
-  const pattern = /^### (.+)$\n^(https?:\/\/\S+)$/gm;
-  for (const match of text.matchAll(pattern)) {
-    const title = match[1]?.trim().slice(0, 250);
-    const url = publicSourceUrl(match[2] ?? "");
-    if (!title || !url || seen.has(url)) {
-      continue;
-    }
-    seen.add(url);
-    sources.push({ publishedAt: null, snippet: "", title, url });
-    if (sources.length >= 8) {
-      break;
-    }
-  }
-  return sources;
 }
 
 export type WebSearchExecutor = (input: {

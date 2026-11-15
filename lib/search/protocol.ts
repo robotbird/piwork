@@ -2,6 +2,8 @@ import { z } from "zod";
 
 // Platform-owned names deliberately do not collide with pi-web-access/web_search.
 export const WEB_SEARCH_TOOL = "platform_web_search";
+/** pi-web-access plugin tool whose text output carries search result regions. */
+export const PI_WEB_ACCESS_SEARCH_TOOL = "web_search";
 export const searchInputSchema = z
   .object({
     limit: z.number().int().min(1).max(8).default(5),
@@ -74,11 +76,20 @@ export function publicSourceUrl(value: unknown): string | undefined {
   }
 }
 
-/** Project only bounded source metadata from successful platform tool results. */
+/** Project only bounded source metadata from successful platform tool results.
+ *
+ * Two producers are recognized:
+ * - `platform_web_search` (piwork): the bounded `details.sources` projection.
+ * - pi-web-access `web_search`: the plugin's `### title\n<url>` text regions
+ *   re-parsed by extractSearchSources; anything else is dropped.
+ */
 export function searchSources(
   toolName: string,
   result: unknown
 ): SearchSource[] {
+  if (toolName === PI_WEB_ACCESS_SEARCH_TOOL) {
+    return extractSearchSources(toolResultText(result));
+  }
   if (toolName !== WEB_SEARCH_TOOL || !result || typeof result !== "object") {
     return [];
   }
@@ -113,4 +124,51 @@ export function searchSources(
       },
     ];
   });
+}
+
+/** Join the text blocks of a Pi tool result (or pass through a plain string). */
+export function toolResultText(result: unknown): string {
+  if (typeof result === "string") {
+    return result;
+  }
+  if (!result || typeof result !== "object") {
+    return "";
+  }
+  const { content } = result as { content?: unknown };
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  return content
+    .flatMap((block: unknown) => {
+      if (
+        block &&
+        typeof block === "object" &&
+        (block as { type?: unknown }).type === "text" &&
+        typeof (block as { text?: unknown }).text === "string"
+      ) {
+        return [(block as { text: string }).text];
+      }
+      return [];
+    })
+    .join("\n");
+}
+
+/** Bounded extraction from the pi-web-access `### title\n<url>` result regions. */
+export function extractSearchSources(text: string): SearchSource[] {
+  const sources: SearchSource[] = [];
+  const seen = new Set<string>();
+  const pattern = /^### (.+)$\n^(https?:\/\/\S+)$/gm;
+  for (const match of text.matchAll(pattern)) {
+    const title = match[1]?.trim().slice(0, 250);
+    const url = publicSourceUrl(match[2] ?? "");
+    if (!title || !url || seen.has(url)) {
+      continue;
+    }
+    seen.add(url);
+    sources.push({ publishedAt: null, snippet: "", title, url });
+    if (sources.length >= 8) {
+      break;
+    }
+  }
+  return sources;
 }
