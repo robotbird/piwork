@@ -14,9 +14,33 @@ export type SearchSource = {
   title: string;
   url: string;
   publishedAt: string | null;
+  /** Bounded display snippet projected to the UI; never fed back to the model. */
+  snippet: string;
 };
 export type SearchResult = SearchSource & { snippet: string };
 export type SearchResponse = { provider: "tavily"; results: SearchResult[] };
+
+/** Rich source metadata carried by the `data-web-source` UI message part. */
+export type WebSourceData = {
+  publishedAt?: string;
+  snippet?: string;
+  sourceId: string;
+  title: string;
+  url: string;
+};
+
+/** Favicon fetch bound for a display-only public host, served by /api/favicon. */
+export function publicFaviconHost(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return;
+  }
+  // Reuse the conservative display URL rules by wrapping the bare host.
+  const href = publicSourceUrl(`https://${value.replace(/^\/+/, "")}`);
+  if (!href) {
+    return;
+  }
+  return new URL(href).hostname.toLowerCase();
+}
 
 /** Display-only URL validation. We never fetch these URLs on the host.
  * Conservative: IP literals, custom ports and local/special-use names are omitted.
@@ -79,6 +103,11 @@ export function searchSources(
           typeof record.publishedAt === "string"
             ? record.publishedAt.slice(0, 80)
             : null,
+        // Display-only excerpt for the sources panel; bounded like every field.
+        snippet:
+          typeof record.snippet === "string"
+            ? record.snippet.slice(0, 300)
+            : "",
         title: record.title.slice(0, 250),
         url,
       },

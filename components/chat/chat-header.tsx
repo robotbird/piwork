@@ -72,23 +72,20 @@ function PureChatHeader({
       {hasMessages || projectId ? (
         <>
           <div className="flex min-w-0 items-center gap-2.5 text-[15px]">
-            <FolderIcon className="size-[18px] shrink-0 text-muted-foreground" />
-            <span
-              className={
-                projectId
-                  ? "max-w-[min(40vw,280px)] truncate font-medium text-foreground"
-                  : "hidden font-medium text-foreground sm:inline"
-              }
-              title={projectName}
-            >
-              {projectId ? (projectName ?? t("appSidebar.projects")) : "PiWork"}
-            </span>
-            <span className="hidden text-muted-foreground sm:inline">/</span>
+            {projectId ? (
+              <>
+                <FolderIcon className="size-[18px] shrink-0 text-muted-foreground" />
+                <span
+                  className="max-w-[min(40vw,280px)] truncate font-medium text-foreground"
+                  title={projectName}
+                >
+                  {projectName ?? t("appSidebar.projects")}
+                </span>
+                <span className="hidden text-muted-foreground sm:inline">/</span>
+              </>
+            ) : null}
             <span className="max-w-[min(42vw,460px)] truncate text-muted-foreground">
               {title}
-            </span>
-            <span className="hidden text-muted-foreground/70 sm:inline">
-              · {t("chat.work")}
             </span>
           </div>
           <div className="ml-auto flex items-center gap-1 text-muted-foreground">

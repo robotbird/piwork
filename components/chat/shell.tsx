@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { Artifact } from "./artifact";
 import { ChatHeader } from "./chat-header";
 import { DataStreamHandler } from "./data-stream-handler";
+import { Greeting } from "./greeting";
 import { submitEditedMessage } from "./message-editor";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
@@ -179,7 +180,6 @@ export function ChatShell() {
               addToolApprovalResponse={addToolApprovalResponse}
               chatId={chatId}
               isArtifactVisible={isArtifactVisible}
-              isLoading={isLoading}
               isReadonly={isReadonly}
               messages={messages}
               onEditMessage={handleEditMessage}
@@ -192,8 +192,7 @@ export function ChatShell() {
 
             <div
               className={cn(
-                // z-20：必须高于 Messages 中 Greeting 的 z-10 遮罩层，
-                // 否则空会话时问候文字会盖住 slash 命令浮层
+                // z-20：必须高于 Messages 的 z-10 层，避免被消息内容遮挡
                 "z-20 mx-auto flex w-full flex-col items-center gap-2 bg-transparent px-4 md:px-8",
                 messages.length === 0
                   ? "absolute max-w-[var(--chat-composer-max)]"
@@ -203,17 +202,15 @@ export function ChatShell() {
                 messages.length === 0
                   ? {
                       left: "50%",
-                      top: "37.5%",
+                      top: "30%",
                       transform: "translateX(-50%)",
                     }
                   : undefined
               }
             >
-              {messages.length > 0 ? (
-                <p className="text-center text-[12px] leading-5 text-muted-foreground/70">
-                  {t("chat.piworkCanMakeMistakesCheckImportantInformation")}
-                </p>
-              ) : null}
+              {messages.length === 0 && !isLoading && !isReadonly && (
+                <Greeting />
+              )}
               {!isReadonly && (
                 <MultimodalInput
                   attachments={attachments}

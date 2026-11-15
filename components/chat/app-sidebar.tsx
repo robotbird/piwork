@@ -118,7 +118,7 @@ export function AppSidebar({
             href="/"
             onClick={handleCloseMobile}
           >
-            <span className="text-[20px] font-semibold tracking-[-0.03em] text-sidebar-accent-foreground">
+            <span className="text-[16px] font-semibold tracking-[-0.03em] text-sidebar-accent-foreground">
               PiWork
             </span>
           </Link>
