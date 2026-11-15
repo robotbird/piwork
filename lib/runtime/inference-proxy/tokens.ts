@@ -29,6 +29,17 @@ export type RunTokenGrant = {
   runId: string;
   chatId: string;
   grants: readonly RunModelGrant[];
+  /** 沙箱宿主工具桥 scope（第一期：create_scheduled_task）。身份只在
+   * grant 里——userId 由 RunManager 以 RunStartInput.userId 绑定（唯一
+   * 事实源），工具请求体永不携带身份。 */
+  hostTools?: RunHostToolsGrant;
+};
+
+/** 宿主工具授权：允许调用的工具名 + 已鉴权发起人 + 消息级幂等盐 */
+export type RunHostToolsGrant = {
+  tools: readonly string[];
+  userId: string;
+  idempotencyKey: string;
 };
 
 type StoredGrant = RunTokenGrant & {
@@ -61,6 +72,7 @@ export class RunTokenRegistry {
     runId: string;
     chatId: string;
     grants: readonly RunModelGrant[];
+    hostTools?: RunHostToolsGrant;
     ttlMs?: number;
   }): { token: string; grant: RunTokenGrant } {
     if (request.grants.length === 0) {
@@ -72,6 +84,11 @@ export class RunTokenRegistry {
       ...request,
       expiresAt: this.now() + ttlMs,
       grants: [...request.grants],
+      hostTools: request.hostTools && {
+        idempotencyKey: request.hostTools.idempotencyKey,
+        tools: [...request.hostTools.tools],
+        userId: request.hostTools.userId,
+      },
       revoked: false,
       tokenHash: hashToken(token),
       ttlMs,
@@ -87,6 +104,7 @@ export class RunTokenRegistry {
       grant: {
         chatId: request.chatId,
         grants: stored.grants,
+        ...(stored.hostTools ? { hostTools: stored.hostTools } : {}),
         runId: request.runId,
       },
       token,
@@ -103,6 +121,7 @@ export class RunTokenRegistry {
     return {
       chatId: stored.chatId,
       grants: stored.grants,
+      ...(stored.hostTools ? { hostTools: stored.hostTools } : {}),
       runId: stored.runId,
     };
   }

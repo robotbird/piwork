@@ -13,6 +13,14 @@ import { loadAuthorizedProjectDocuments } from "@/lib/db/project-document-querie
 import { upsertMessage } from "@/lib/db/queries";
 import { PostgresEventStore } from "@/lib/db/runtime-event-queries";
 import { getSandboxResourcePolicy } from "@/lib/db/sandbox-settings-queries";
+import {
+  CREATE_SCHEDULED_TASK_TOOL_NAME,
+  createScheduledTaskHostTool,
+} from "@/lib/scheduler/host-tool";
+import {
+  createWebSearchHostTool,
+  WEB_SEARCH_HOST_TOOL_NAME,
+} from "@/lib/web-access/host-tool";
 import { DurableBackend } from "../backends/durable/backend";
 import { readDurableChatConfig } from "../backends/durable/chat-policy";
 import { InProcessBackend } from "../backends/in-process/backend";
@@ -26,6 +34,7 @@ import {
   SandboxRpcBackend,
 } from "../backends/sandbox-rpc/backend";
 import {
+  createHostToolsHandler,
   InferenceProxyServer,
   RunTokenRegistry,
   type UpstreamResolver,
@@ -132,8 +141,30 @@ function buildInferenceOptions(): SandboxInferenceOptions | undefined {
       .find((candidate) => candidate.id === grant.model);
     return provider && model ? { model, provider } : null;
   };
+  const upstreamIdleTimeoutMs = parseOptionalInt(
+    "PIWORK_INFERENCE_UPSTREAM_IDLE_TIMEOUT_MS"
+  );
   const server = new InferenceProxyServer({
     audit: { record: (entry) => recordInferenceAudit(entry) },
+    ...(upstreamIdleTimeoutMs === undefined ? {} : { upstreamIdleTimeoutMs }),
+    hostTools: createHostToolsHandler({
+      // Transport/audit substrate is shared across phases; authorization,
+      // budgets and failure semantics stay per-tool. Phase 1+2 surface:
+      // create_scheduled_task + platform_web_search (pi-web-access MCP).
+      audit: {
+        record: (entry) => {
+          if (entry.status === "allowed") {
+            return;
+          }
+          console.warn("[host-tools] request rejected", entry);
+        },
+      },
+      tokens,
+      tools: {
+        [CREATE_SCHEDULED_TASK_TOOL_NAME]: createScheduledTaskHostTool(),
+        [WEB_SEARCH_HOST_TOOL_NAME]: createWebSearchHostTool(),
+      },
+    }),
     resolver,
     tokens,
   });

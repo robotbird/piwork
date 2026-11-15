@@ -1070,3 +1070,51 @@ test("会话清理失败：settled 不隐含清理成功，cleanupError 独立�
   assert.equal(await manager.abortByChat(CHAT), false);
   subscription.close();
 });
+
+test("host tools bridge: authenticated initiator is bound into spec.hostTools before backend.open", async () => {
+  const opened: RuntimeSpec[] = [];
+  const inner = new InMemoryBackend({ onPrompt: () => textSteps("ok") });
+  const manager = new RunManager({
+    backend: {
+      // biome-ignore lint/suspicious/useAwait: 记录型包装替身，透传 open 无需额外 await
+      open: async (input) => {
+        opened.push(input);
+        return inner.open(input);
+      },
+    },
+    eventStore: new InMemoryEventStore(),
+    messageStore: new RecordingMessageStore(),
+    runStore: new RecordingRunStore(),
+    workerId: "test-worker",
+  });
+  const bridgedSpec: RuntimeSpec = {
+    ...spec(),
+    hostTools: { idempotencyKey: "message-1" },
+  };
+  const run = await manager.start({
+    prompt: { text: "创建定时任务", type: "prompt" },
+    spec: bridgedSpec,
+    userId: USER,
+  });
+  const subscription = run.attach();
+  assert.ok(subscription, "start 后应能立即 attach");
+  assert.equal(await subscription.settled, "settled");
+  // Only the RunStartInput userId is bound; the caller's spec object stays
+  // untouched (no second identity copy outside the manager).
+  assert.deepEqual(opened[0]?.hostTools, {
+    idempotencyKey: "message-1",
+    userId: USER,
+  });
+  assert.equal(bridgedSpec.hostTools?.userId, undefined);
+
+  // Runs without host tools carry no binding at all.
+  const plain = await manager.start({
+    prompt: { text: "普通消息", type: "prompt" },
+    spec: spec("00000000-0000-4000-8000-000000000003"),
+    userId: USER,
+  });
+  const plainSubscription = plain.attach();
+  assert.ok(plainSubscription);
+  assert.equal(await plainSubscription.settled, "settled");
+  assert.equal(opened[1]?.hostTools, undefined);
+});

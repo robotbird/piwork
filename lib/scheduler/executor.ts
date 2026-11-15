@@ -22,7 +22,13 @@ import {
 } from "@/lib/db/scheduled-task-queries";
 import type { ScheduledTaskRecord } from "@/lib/db/schema";
 import { syncManagedAgentMcpConfig } from "@/lib/mcp/agent-config";
+import { willRunSandbox } from "@/lib/runtime/backends/routing/backend";
 import { getRunManager } from "@/lib/runtime/run";
+import {
+  createWebSearchBridgeTool,
+  webAccessPrompt,
+} from "@/lib/web-access/host-tool";
+import { getWebAccessService } from "@/lib/web-access/mcp-host";
 import { waitForTaskCompletion } from "./completion";
 
 /** Accept only atomically claimed tasks. The scheduler never implements an agent loop. */
@@ -70,6 +76,14 @@ export async function executeScheduledTask(task: ScheduledTaskRecord) {
     // 协作实时：定时任务新对话首条用户消息落库后通知（房间通常为空，
     // 无 watcher 时广播为 no-op；与聊天路由同一语义）
     publishChatMessage({ actorId: task.userId, chatId, role: "user" });
+    // 沙箱宿主工具桥（二期）：任务 run 实际进沙箱且插件可用时，仅追加
+    // 联网能力（platform_web_search），不追加 create_scheduled_task——
+    // 执行器无创建权限；hostTools 幂等盐用任务 id（userId 由 RunManager
+    // 以 RunStartInput.userId=task.userId 绑定）。
+    const webAccess =
+      workspaceDir !== null &&
+      willRunSandbox({ workspaceDir }) &&
+      (await getWebAccessService().available());
     const handle = await manager.start({
       prompt: { text: task.prompt, type: "prompt" },
       spec: {
@@ -78,14 +92,27 @@ export async function executeScheduledTask(task: ScheduledTaskRecord) {
           ...(workspaceDir
             ? [buildExecutionSystemPrompt(workspaceDir, [])]
             : []),
+          ...(webAccess ? [webAccessPrompt + new Date().toISOString()] : []),
           `这是定时执行的任务。当前时间 ${new Date().toISOString()}。直接完成工作，不要创建新的定时任务。无法获取所需信息时如实说明，不编造实时信息或声称已发送通知。`,
         ],
         chatId,
         historyMessages: [],
+        ...(webAccess ? { hostTools: { idempotencyKey: task.id } } : {}),
         model,
         skills,
         systemPrompt: regularPrompt,
-        tools: createSkillTools(skills),
+        tools: [
+          ...createSkillTools(skills),
+          ...(webAccess
+            ? [
+                createWebSearchBridgeTool({
+                  chatId,
+                  model: { id: model.id, provider: model.provider },
+                  userId: task.userId,
+                }),
+              ]
+            : []),
+        ],
         workspaceDir,
       },
       userId: task.userId,

@@ -65,6 +65,7 @@ import { projectDocumentInputsEnabled } from "@/lib/projects/document-inputs";
 import { durableChatExecutionPrompt } from "@/lib/runtime/backends/durable/chat-attachments";
 import { hashDurablePrompt } from "@/lib/runtime/backends/durable/chat-input";
 import { readDurableChatConfig } from "@/lib/runtime/backends/durable/chat-policy";
+import { willRunSandbox } from "@/lib/runtime/backends/routing/backend";
 import {
   chatNeedsCompatibility,
   projectChatExecution,
@@ -89,6 +90,11 @@ import {
   generateUUID,
   getTextFromMessage,
 } from "@/lib/utils";
+import {
+  createWebSearchBridgeTool,
+  webAccessPrompt,
+} from "@/lib/web-access/host-tool";
+import { getWebAccessService } from "@/lib/web-access/mcp-host";
 import { generateTitleFromUserMessage } from "../../actions";
 import {
   isMessageTextTooLongError,
@@ -553,6 +559,14 @@ export async function POST(request: Request) {
       : workspaceDir
         ? buildExecutionSystemPrompt(workspaceDir, workspaceAttachmentFiles)
         : "";
+    // 沙箱宿主工具桥（二期）：实际会进沙箱的 run 且插件可用时，装配
+    // platform_web_search 桥接工具与提示词（轻量通道的 Tavily 闭包已含
+    // 同名工具时跳过，避免重名）。
+    const webAccessBridge =
+      !isDurable &&
+      willRunSandbox({ lane: routing.lane, workspaceDir }) &&
+      !(platformWebSearch && !workspaceDir) &&
+      (await getWebAccessService().available());
     const historyMessages = toPiHistoryMessages(
       uiMessages.slice(0, currentUserMessageIndex),
       chatModel
@@ -721,6 +735,11 @@ export async function POST(request: Request) {
               spec: {
                 ...(projectSources ? { projectSources } : {}),
                 lane: routing.lane,
+                // 沙箱宿主工具桥：只传消息级幂等盐（发起人 userId 由
+                // RunManager 以 RunStartInput.userId 绑定，单一事实源）
+                ...(isDurable
+                  ? {}
+                  : { hostTools: { idempotencyKey: currentUserMessage.id } }),
                 ...(isDurable
                   ? {
                       durableChat: {
@@ -739,6 +758,9 @@ export async function POST(request: Request) {
                       ...(platformWebSearch && !workspaceDir
                         ? [webSearchPrompt + new Date().toISOString()]
                         : []),
+                      ...(webAccessBridge
+                        ? [webAccessPrompt + new Date().toISOString()]
+                        : []),
                       ...(executionPrompt ? [executionPrompt] : []),
                     ],
                 chatId: id,
@@ -756,6 +778,18 @@ export async function POST(request: Request) {
                             model: piModel,
                             userId: session.user.id,
                           })
+                        : []),
+                      ...(webAccessBridge
+                        ? [
+                            createWebSearchBridgeTool({
+                              chatId: id,
+                              model: {
+                                id: piModel.id,
+                                provider: piModel.provider,
+                              },
+                              userId: session.user.id,
+                            }),
+                          ]
                         : []),
                       ...scheduledTaskTools(
                         session.user.id,

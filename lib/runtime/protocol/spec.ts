@@ -32,6 +32,16 @@ export type RuntimeSpec = {
   projectSources?: ProjectSourcesGrant;
   /** Explicit request lane. Selection is not authorization. */
   lane?: "default" | "durable_sandbox";
+  /** Sandbox Host Tools Bridge context. The route supplies only the
+   * message-level idempotency key; RunManager binds the authenticated
+   * RunStartInput.userId (single source of truth) before backend.open, and
+   * SandboxRpc mints the token hostTools scope from both. Never accepted
+   * from request JSON; in-process backends execute spec.tools closures
+   * directly and ignore this field. */
+  hostTools?: {
+    idempotencyKey: string;
+    userId?: string;
+  };
   /** Server-assembled, reference-only grant; never accepted from request JSON. */
   durableChat?: {
     userId: string;

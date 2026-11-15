@@ -1893,6 +1893,7 @@
     "searchDisabled": "Platform web search is disabled.",
     "searchUnconfigured": "Platform web search is not configured. Ask an administrator to set the Tavily API Key.",
     "searchRoundLimit": "The six-search limit for this turn has been reached.",
+    "searchInvalidInput": "Invalid search parameters: provide concise keywords (1-500 chars), optionally limit (1-8) and recency.",
     "searchTimeout": "Web search timed out. Please try again later.",
     "searchUnavailable": "Web search is temporarily unavailable. Please try again later; no search results were received.",
     "searchUnauthorized": "Web search authorization failed. Check that your account, chat ownership and model permissions are still valid.",

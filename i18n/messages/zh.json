@@ -1893,6 +1893,7 @@
     "searchDisabled": "平台联网搜索未启用。",
     "searchUnconfigured": "平台联网搜索尚未配置，请联系管理员设置 Tavily API Key。",
     "searchRoundLimit": "本轮联网搜索已达到 6 次上限。",
+    "searchInvalidInput": "搜索参数无效：请提供精炼关键词（1-500 字符），可带 limit（1-8）与 recency。",
     "searchTimeout": "联网搜索超时，请稍后重试。",
     "searchUnavailable": "联网搜索服务暂时不可用，请稍后重试；尚未获得搜索结果。",
     "searchUnauthorized": "联网搜索授权失败：请确认账户、聊天归属和模型权限仍然有效。",

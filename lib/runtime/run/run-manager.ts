@@ -313,7 +313,16 @@ export class RunManager {
       });
       let session: RuntimeSession;
       try {
-        session = await this.options.backend.open({ ...input.spec, runId });
+        // Sandbox Host Tools Bridge: hostTools authorization identity is
+        // bound here from the authenticated RunStartInput.userId — the route
+        // only supplies the idempotency key, so no second userId copy exists.
+        session = await this.options.backend.open({
+          ...input.spec,
+          hostTools: input.spec.hostTools
+            ? { ...input.spec.hostTools, userId: input.userId }
+            : undefined,
+          runId,
+        });
       } catch (error) {
         await this.options.runStore
           .markRunStatus(runId, "failed", {

@@ -88,3 +88,29 @@ test("expired lease recovery fences off late completion", async () => {
   await finishScheduledTask(current, null);
   assert.equal((await getScheduledTask(owner, task.id))?.status, "succeeded");
 });
+test("createTaskForUser: 同一消息同参数跨 run 幂等；参数变化/换用户另建", async () => {
+  const { createTaskForUser } = await import("../../../lib/scheduler/service");
+  const variant = {
+    ...input,
+    prompt: "idempotency probe",
+    taskType: "idem",
+  };
+  const salt = "message-idemp-1";
+  // 同一消息（同 salt）、相同参数重跑（对应不同 runId）→ 返回原任务
+  const first = await createTaskForUser(owner, salt, variant);
+  const second = await createTaskForUser(owner, salt, variant);
+  assert.equal(first.id, second.id);
+  const rows =
+    await sql`SELECT count(*)::int AS n FROM "ScheduledTask" WHERE "userId" = ${owner} AND "taskType" = 'idem'`;
+  assert.equal(rows[0].n, 1);
+  // 参数变化 → 另建一条
+  const changed = await createTaskForUser(owner, salt, {
+    ...variant,
+    taskType: "idem-2",
+  });
+  assert.notEqual(changed.id, first.id);
+  // 身份参与哈希：同 salt 同参数、不同发起人 → 各自名下各一条
+  const theirs = await createTaskForUser(other, salt, variant);
+  assert.notEqual(theirs.id, first.id);
+});
+

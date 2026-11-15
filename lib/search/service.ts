@@ -25,8 +25,10 @@ const shared = globalThis as typeof globalThis & {
 const limits = shared.piworkSearchLimits ?? { active: 0, users: new Map() };
 shared.piworkSearchLimits = limits;
 
-/** Process-local admission only, not a distributed quota/billing ledger. */
-function reserve(userId: string): () => void {
+/** Process-local admission only, not a distributed quota/billing ledger.
+ * Shared by the Tavily gateway and the sandbox host-tools web search bridge
+ * (phase 2) so both paths draw from the same per-user budget. */
+export function reserveSearchAdmission(userId: string): () => void {
   const now = Date.now();
   for (const [id, entry] of limits.users) {
     if (!entry.active && now - entry.since >= WINDOW_MS) {
@@ -174,7 +176,7 @@ export function createSearchGateway(options: {
     if (calls >= 6) {
       throw new LocalizedError("runtimeMessages.searchRoundLimit");
     }
-    const release = reserve(options.userId);
+    const release = reserveSearchAdmission(options.userId);
     calls += 1;
     const deadline = AbortSignal.any([
       AbortSignal.timeout(options.timeoutMs ?? TIMEOUT_MS),

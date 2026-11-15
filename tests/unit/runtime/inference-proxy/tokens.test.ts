@@ -87,3 +87,19 @@ test("mint 的 token 两两不同（随机 32B）", () => {
 test("默认 TTL 为 30 分钟", () => {
   assert.equal(DEFAULT_RUN_TOKEN_TTL_MS, 30 * 60_000);
 });
+
+test("hostTools 声明随 mint/validate 往返；缺省不产生 scope", () => {
+  const tokens = new RunTokenRegistry();
+  const hostTools = {
+    idempotencyKey: "message-1",
+    tools: ["create_scheduled_task"],
+    userId: "00000000-0000-4000-8000-0000000000ff",
+  };
+  const { token, grant } = tokens.mint({ ...GRANT, hostTools });
+  assert.deepEqual(grant.hostTools, hostTools);
+  assert.deepEqual(tokens.validate(token)?.hostTools, hostTools);
+  // 缺省签发：无 hostTools scope（validate 后亦无）
+  const plain = tokens.mint(GRANT);
+  assert.equal(plain.grant.hostTools, undefined);
+  assert.equal(tokens.validate(plain.token)?.hostTools, undefined);
+});

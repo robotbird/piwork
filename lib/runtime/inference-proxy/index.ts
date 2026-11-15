@@ -8,6 +8,18 @@ import "server-only";
 
 export { toPiMessagesEvent } from "./events";
 export {
+  createHostToolsHandler,
+  HOST_TOOLS_MAX_BODY_BYTES,
+  HOST_TOOLS_PATH_PREFIX,
+  type HostTool,
+  type HostToolCallContext,
+  type HostToolResult,
+  type HostToolsAuditEntry,
+  type HostToolsAuditSink,
+  HostToolsError,
+  type HostToolsRequestHandler,
+} from "./host-tools";
+export {
   buildSandboxModelsJson,
   RUN_TOKEN_ENV,
   type SandboxModelEntry,
@@ -23,6 +35,7 @@ export {
 } from "./server";
 export {
   DEFAULT_RUN_TOKEN_TTL_MS,
+  type RunHostToolsGrant,
   type RunModelGrant,
   type RunTokenGrant,
   RunTokenRegistry,

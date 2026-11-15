@@ -8,12 +8,12 @@ import { LocalRpcBackend } from "../../../../lib/runtime/backends/local-rpc/back
 import {
   RoutingRuntimeBackend,
   requiresSandbox,
+  willRunSandbox,
 } from "../../../../lib/runtime/backends/routing/backend";
-import { SandboxRpcBackend } from "../../../../lib/runtime/backends/sandbox-rpc/backend";
+import { HOST_TOOLS_BRIDGEABLE } from "../../../../lib/runtime/backends/sandbox-rpc/host-tools-extension";
 import type { RuntimeSpec } from "../../../../lib/runtime/protocol";
-import { TestSandboxProvider } from "../../../support/sandbox/test-sandbox-provider";
 
-test("matrix routes platform search without workspace to lightweight; RPC rejects unsupported search before launch", async () => {
+test("matrix routes platform search without workspace to lightweight; LocalRpc still rejects; SandboxRpc bridges", async () => {
   const spec: RuntimeSpec = {
     appendSystemPrompt: [],
     chatId: crypto.randomUUID(),
@@ -49,9 +49,43 @@ test("matrix routes platform search without workspace to lightweight; RPC reject
   );
   assert.equal(selected, "sandbox");
   await assert.rejects(new LocalRpcBackend().open(spec), /尚未接入 LocalRpc/);
-  const sandbox = new SandboxRpcBackend({
-    provider: new TestSandboxProvider(),
-    remoteCliPath: "/opt/pi/cli.js",
-  });
-  await assert.rejects(sandbox.open(spec), /尚未接入 SandboxRpc/);
+  // 二期起 SandboxRpc 不再启动前拒绝 platform_web_search：按名桥接
+  // （scope 铸发与全栈行为见 sandbox-rpc/host-tools-bridge.test.ts）。
+  assert.equal(HOST_TOOLS_BRIDGEABLE.has("platform_web_search"), true);
+});
+
+test("willRunSandbox：与 resolveBackend 的实际沙箱选择保持一致（matrix/all/durable）", () => {
+  const matrix = {
+    PIWORK_SANDBOX_PROVIDER: "docker",
+    PIWORK_SANDBOX_ROUTING: undefined,
+  };
+  assert.equal(
+    willRunSandbox({ workspaceDir: null }, matrix),
+    false,
+    "matrix + 纯对话 → in-process"
+  );
+  assert.equal(
+    willRunSandbox({ workspaceDir: "/ws" }, matrix),
+    true,
+    "matrix + 执行类 → 沙箱"
+  );
+  const all = { ...matrix, PIWORK_SANDBOX_ROUTING: "all" };
+  assert.equal(
+    willRunSandbox({ workspaceDir: null }, all),
+    true,
+    "all 路由 → 全量沙箱"
+  );
+  assert.equal(
+    willRunSandbox({ lane: "durable_sandbox", workspaceDir: null }, all),
+    false,
+    "durable lane 走 DurableBackend"
+  );
+  assert.equal(
+    willRunSandbox(
+      { workspaceDir: "/ws" },
+      { PIWORK_SANDBOX_PROVIDER: undefined, PIWORK_SANDBOX_ROUTING: undefined }
+    ),
+    false,
+    "未装配沙箱 → in-process"
+  );
 });

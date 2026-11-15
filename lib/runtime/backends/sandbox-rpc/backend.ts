@@ -8,6 +8,7 @@ import { RpcClient } from "@earendil-works/pi-coding-agent";
 import {
   buildSandboxModelsJson,
   RUN_TOKEN_ENV,
+  type RunHostToolsGrant,
   sandboxModelEntryFromModel,
 } from "../../inference-proxy";
 import type {
@@ -41,6 +42,12 @@ import {
   DELIVER_FILE_EXTENSION_PATH,
   deliverFileExtensionSource,
 } from "./deliver-file-extension";
+import {
+  HOST_TOOLS_BRIDGEABLE,
+  HOST_TOOLS_EXTENSION_PATH,
+  type HostToolsBridgeName,
+  hostToolsExtensionSource,
+} from "./host-tools-extension";
 import {
   installProjectDocuments,
   type ProjectDocumentLoader,
@@ -121,6 +128,8 @@ export type SandboxInferenceOptions = {
     runId: string;
     chatId: string;
     grants: readonly { provider: string; model: string }[];
+    /** Sandbox Host Tools Bridge scope (phase 1: create_scheduled_task) */
+    hostTools?: RunHostToolsGrant;
   }) => string | Promise<string>;
   /** run 关闭/失败时撤销该 run 的 token（幂等） */
   revokeRunTokens: (runId: string) => void | Promise<void>;
@@ -206,11 +215,21 @@ export class SandboxRpcBackend implements RuntimeBackend {
     ) {
       throw new Error("runtime:project-documents:sandbox-rpc-loader-required");
     }
-    if (spec.tools.some((tool) => tool.name === "platform_web_search")) {
-      throw new Error(
-        "平台联网搜索尚未接入 SandboxRpc；不能丢弃工具或回退宿主执行。"
-      );
-    }
+    // Sandbox Host Tools Bridge (phases 1+2): closure tools that cannot cross
+    // the process boundary are mapped by name to an explicit sandbox-side
+    // extension; identity/scopes ride the run token. See host-tools-extension.
+    // platform_web_search previously failed closed here — phase 2 bridges it
+    // to the host-side pi-web-access MCP service.
+    const bridgedTools = [
+      ...new Set(
+        spec.tools
+          .map((tool) => tool.name)
+          .filter((name): name is HostToolsBridgeName =>
+            HOST_TOOLS_BRIDGEABLE.has(name as HostToolsBridgeName)
+          )
+      ),
+    ];
+    const hostToolsScope = this.resolveHostToolsScope(spec, bridgedTools);
     const resource = sandboxResourceSchema.parse(
       this.options.resourcePolicy
         ? await this.options.resourcePolicy()
@@ -232,6 +251,7 @@ export class SandboxRpcBackend implements RuntimeBackend {
       ? await inference.mintRunToken({
           chatId: spec.chatId,
           grants: [{ model: spec.model.id, provider: spec.model.provider }],
+          ...(hostToolsScope ? { hostTools: hostToolsScope } : {}),
           runId,
         })
       : undefined;
@@ -321,6 +341,38 @@ export class SandboxRpcBackend implements RuntimeBackend {
           path.posix.join(handle.workspaceRoot, DELIVER_FILE_EXTENSION_PATH)
         );
       }
+      // Host Tools Bridge 沙箱侧：闭包工具按名映射为显式扩展。缺配置时
+      // 工具仍注册但以明确的"能力不可用"失败——聊天继续，不回退宿主执行。
+      if (bridgedTools.length > 0) {
+        const hostToolsReachable = Boolean(hostToolsScope && inference);
+        const unavailableReason = hostToolsReachable
+          ? undefined
+          : inference
+            ? "本次会话未装配宿主工具上下文，无法创建定时任务；请如实告知用户该能力当前不可用。"
+            : "当前部署未启用推理代理（PIWORK_INFERENCE_URL），沙箱宿主工具桥不可用，无法创建定时任务；请如实告知用户。";
+        if (unavailableReason) {
+          console.warn(
+            "[sandbox-rpc] host tools bridge unavailable; tools will report honestly:",
+            {
+              bridgedTools,
+              chatId: spec.chatId,
+              hasScope: Boolean(hostToolsScope),
+            }
+          );
+        }
+        await handle.writeFile(
+          HOST_TOOLS_EXTENSION_PATH,
+          new TextEncoder().encode(
+            hostToolsExtensionSource({
+              tools: bridgedTools,
+              ...(unavailableReason ? { unavailableReason } : {}),
+            })
+          )
+        );
+        extensions.push(
+          path.posix.join(handle.workspaceRoot, HOST_TOOLS_EXTENSION_PATH)
+        );
+      }
 
       // args 复用 LocalRpc 派生（--session/--system-prompt/extensions 等
       // 引用沙箱内路径）；derived.env/cwd 属宿主侧，不进沙箱
@@ -361,6 +413,9 @@ export class SandboxRpcBackend implements RuntimeBackend {
           PI_CODING_AGENT_DIR: remoteAgentDir,
           PI_OFFLINE: "1",
           ...(runToken === undefined ? {} : { [RUN_TOKEN_ENV]: runToken }),
+          ...(hostToolsScope && inference
+            ? { PIWORK_HOST_TOOLS_URL: inference.proxyUrl }
+            : {}),
           ...(this.options.env ?? {}),
         },
       });
@@ -467,6 +522,37 @@ export class SandboxRpcBackend implements RuntimeBackend {
       }
       throw error;
     }
+  }
+
+  /**
+   * Host Tools Bridge scope derivation. Identity/idempotency come from
+   * spec.hostTools (userId bound by RunManager from the authenticated
+   * RunStartInput; idempotencyKey from the route's user message id). A
+   * half-bound context (key without userId) is an assembly bug and fails
+   * closed; a missing context downgrades the tools to "unavailable" instead
+   * of failing the whole chat.
+   */
+  private resolveHostToolsScope(
+    spec: RuntimeSpec,
+    bridgedTools: readonly HostToolsBridgeName[]
+  ): RunHostToolsGrant | undefined {
+    if (bridgedTools.length === 0) {
+      return;
+    }
+    const context = spec.hostTools;
+    if (!context) {
+      return;
+    }
+    if (!context.userId) {
+      throw new Error(
+        "runtime:sandbox:host-tools:unbound-user（RunManager 必须在 backend.open 前绑定 RunStartInput.userId）"
+      );
+    }
+    return {
+      idempotencyKey: context.idempotencyKey,
+      tools: [...bridgedTools],
+      userId: context.userId,
+    };
   }
 }
 
