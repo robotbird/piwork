@@ -9,6 +9,31 @@ export const DEFAULT_BASE_URL = "https://api.deepseek.com";
 
 const VALIDATION_MODEL = "deepseek-v4-flash";
 
+/**
+ * Backoff delays before retrying a throttled (HTTP 429) probe.
+ * Total worst case must stay below the host's 20s validation timeout.
+ */
+const THROTTLE_RETRY_DELAYS_MS = [1000, 2000];
+
+/** Abort-aware sleep used between throttled probe retries. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error("Credential validation aborted"));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error("Credential validation aborted"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 export const definition: ProviderDefinition = {
   credentialFields: [
     {
@@ -59,26 +84,48 @@ export async function validateCredentials(
     throw new Error("api_key is required");
   }
 
-  const response = await ctx.fetch(`${DEFAULT_BASE_URL}/chat/completions`, {
-    body: JSON.stringify({
-      max_tokens: 1,
-      messages: [{ content: "ping", role: "user" }],
-      model: VALIDATION_MODEL,
-      stream: false,
-    }),
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    method: "POST",
-    signal: ctx.signal,
-  });
+  const probe = () =>
+    ctx.fetch(`${DEFAULT_BASE_URL}/chat/completions`, {
+      body: JSON.stringify({
+        max_tokens: 1,
+        messages: [{ content: "ping", role: "user" }],
+        model: VALIDATION_MODEL,
+        stream: false,
+      }),
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+      signal: ctx.signal,
+    });
+
+  let response = await probe();
+
+  // Retry throttled probes briefly: 429 happens after auth on these providers
+  // (invalid keys get 401/403), so it is transient and not a key problem.
+  for (const delayMs of THROTTLE_RETRY_DELAYS_MS) {
+    if (response.status !== 429) {
+      break;
+    }
+    // biome-ignore lint/performance/noAwaitInLoops: sequential backoff before retrying the throttled probe
+    await sleep(delayMs, ctx.signal);
+    response = await probe();
+  }
 
   if (response.ok) {
     return;
   }
   if (response.status === 401 || response.status === 403) {
     throw new Error(`Invalid API key (HTTP ${response.status})`);
+  }
+  if (response.status === 429) {
+    // Still throttled after retries: the key was authenticated, so accept it
+    // and let the admin save the configuration despite the current rate limit.
+    ctx.logger.warn(
+      "Credential accepted, but the provider throttled the validation probe (HTTP 429)"
+    );
+    return;
   }
   throw new Error(
     `Credential validation failed: HTTP ${response.status} ${response.statusText}`
