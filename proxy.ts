@@ -13,6 +13,13 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Scheduled-task external cron trigger: the route carries its own
+  // timingSafeEqual bearer gate (SCHEDULED_TASKS_API_KEY), so the session
+  // wall below must not preempt it.
+  if (pathname === "/api/scheduled-tasks/execute") {
+    return NextResponse.next();
+  }
+
   if (/\.[^/]+$/.test(pathname)) {
     return NextResponse.next();
   }
