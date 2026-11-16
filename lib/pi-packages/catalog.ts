@@ -54,7 +54,8 @@ export async function searchPiPackageCatalog(
   const text = query.trim()
     ? `keywords:pi-package ${query.trim()}`
     : "keywords:pi-package";
-  const url = `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(text)}&size=${CATALOG_PAGE_SIZE}&offset=${offset}`;
+  // npm search 分页参数是 from;offset 会被忽略,导致翻页重复返回首页
+  const url = `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(text)}&size=${CATALOG_PAGE_SIZE}&from=${offset}`;
   const response = await fetch(url, {
     next: { revalidate: CATALOG_REVALIDATE_SECONDS },
   });
