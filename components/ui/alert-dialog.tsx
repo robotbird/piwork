@@ -92,6 +92,11 @@ function AlertDialogFooter({
       data-slot="alert-dialog-footer"
       className={cn(
         "flex flex-col-reverse gap-2 group-data-[size=sm]/alert-dialog-content:grid group-data-[size=sm]/alert-dialog-content:grid-cols-2 sm:flex-row sm:justify-end",
+        // ChatGPT-style modal actions: pill radius for every action, and the
+        // primary action inverts to ink so dialog footers read black-on-white
+        // (white-on-black in dark) regardless of the owning theme scope.
+        "[&_[data-slot=button]]:rounded-full",
+        "[&_[data-slot=button][data-variant=default]]:bg-foreground [&_[data-slot=button][data-variant=default]]:text-background [&_[data-slot=button][data-variant=default]:hover]:bg-foreground/85",
         className
       )}
       {...props}

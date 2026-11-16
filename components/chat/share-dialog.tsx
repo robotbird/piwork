@@ -18,6 +18,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -480,9 +481,9 @@ export function ShareDialog({
                 </div>
               </div>
             ) : null}
-            <div className="flex flex-wrap items-center gap-2">
+            <DialogFooter className="flex-row flex-wrap items-center">
               <Button
-                className="rounded-[10px] max-sm:min-h-11"
+                className="max-sm:min-h-11"
                 disabled={busyAction}
                 onClick={handleGenerateClick}
                 size="sm"
@@ -495,7 +496,7 @@ export function ShareDialog({
               </Button>
               {data?.invite ? (
                 <Button
-                  className="rounded-[10px] max-sm:min-h-11"
+                  className="max-sm:min-h-11"
                   disabled={busyAction}
                   onClick={handleRevoke}
                   size="sm"
@@ -505,7 +506,7 @@ export function ShareDialog({
                   {t("revokeLink")}
                 </Button>
               ) : null}
-            </div>
+            </DialogFooter>
           </section>
         ) : null}
       </DialogContent>

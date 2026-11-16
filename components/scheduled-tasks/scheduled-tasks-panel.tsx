@@ -874,6 +874,12 @@ function TaskEditor({
     task?.schedule.timezone || "Asia/Shanghai"
   );
   const [saving, setSaving] = useState(false);
+  const isCustomCron = ![
+    "0 9 * * *",
+    "0 9 * * 1-5",
+    "0 9 * * 1",
+    "0 * * * *",
+  ].includes(cron);
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
     setSaving(true);
@@ -911,8 +917,8 @@ function TaskEditor({
       }}
       open
     >
-      <DialogContent className="max-h-[90dvh] overflow-y-auto rounded-3xl">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[85dvh] flex-col rounded-3xl sm:max-w-lg">
+        <DialogHeader className="shrink-0">
           <DialogTitle>
             {task ? t("scheduledTasks.edit") : t("scheduledTasks.manual")}
           </DialogTitle>
@@ -920,86 +926,93 @@ function TaskEditor({
             {t("scheduledTasks.editorHint")}
           </DialogDescription>
         </DialogHeader>
-        <form className="space-y-4" onSubmit={save}>
-          <div className="space-y-2">
-            <Label htmlFor="task-title">{t("scheduledTasks.name")}</Label>
-            <Input
-              id="task-title"
-              maxLength={64}
-              onChange={(event) => setTitle(event.target.value)}
-              required
-              value={title}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="task-prompt">
-              {t("scheduledTasks.instructions")}
-            </Label>
-            <Textarea
-              id="task-prompt"
-              maxLength={10_000}
-              onChange={(event) => setPrompt(event.target.value)}
-              placeholder={t("scheduledTasks.instructionsHint")}
-              required
-              rows={5}
-              value={prompt}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="task-preset">{t("scheduledTasks.plan")}</Label>
-            <select
-              className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-              id="task-preset"
-              onChange={(event) => {
-                if (event.target.value !== "custom") {
-                  setCron(event.target.value);
-                }
-              }}
-              value={
-                ["0 9 * * *", "0 9 * * 1-5", "0 9 * * 1", "0 * * * *"].includes(
-                  cron
-                )
-                  ? cron
-                  : "custom"
+        <form className="flex min-h-0 flex-1 flex-col gap-4" onSubmit={save}>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
+            <div className="space-y-2">
+              <Label htmlFor="task-title">{t("scheduledTasks.name")}</Label>
+              <Input
+                id="task-title"
+                maxLength={64}
+                onChange={(event) => setTitle(event.target.value)}
+                required
+                value={title}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="task-prompt">
+                {t("scheduledTasks.instructions")}
+              </Label>
+              <Textarea
+                className="max-h-64 overflow-y-auto"
+                id="task-prompt"
+                maxLength={10_000}
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder={t("scheduledTasks.instructionsHint")}
+                required
+                rows={5}
+                value={prompt}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="task-preset">{t("scheduledTasks.plan")}</Label>
+              <select
+                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                id="task-preset"
+                onChange={(event) => {
+                  if (event.target.value !== "custom") {
+                    setCron(event.target.value);
+                  }
+                }}
+                value={isCustomCron ? "custom" : cron}
+              >
+                <option value="0 9 * * *">
+                  {t("scheduledTasks.dailyPreset")}
+                </option>
+                <option value="0 9 * * 1-5">
+                  {t("scheduledTasks.weekdaysPreset")}
+                </option>
+                <option value="0 9 * * 1">
+                  {t("scheduledTasks.mondayPreset")}
+                </option>
+                <option value="0 * * * *">{t("scheduledTasks.hourly")}</option>
+                <option value="custom">{t("scheduledTasks.custom")}</option>
+              </select>
+            </div>
+            <div
+              className={
+                isCustomCron
+                  ? "grid grid-cols-2 gap-3"
+                  : "grid grid-cols-1 gap-3"
               }
             >
-              <option value="0 9 * * *">
-                {t("scheduledTasks.dailyPreset")}
-              </option>
-              <option value="0 9 * * 1-5">
-                {t("scheduledTasks.weekdaysPreset")}
-              </option>
-              <option value="0 9 * * 1">
-                {t("scheduledTasks.mondayPreset")}
-              </option>
-              <option value="0 * * * *">{t("scheduledTasks.hourly")}</option>
-              <option value="custom">{t("scheduledTasks.custom")}</option>
-            </select>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label htmlFor="task-cron">{t("scheduledTasks.cron")}</Label>
-              <Input
-                id="task-cron"
-                onChange={(event) => setCron(event.target.value)}
-                required
-                value={cron}
-              />
-              <p className="text-xs text-muted-foreground">
-                {t("scheduledTasks.cronHint")}
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="task-zone">{t("scheduledTasks.timezone")}</Label>
-              <Input
-                id="task-zone"
-                onChange={(event) => setTimezone(event.target.value)}
-                required
-                value={timezone}
-              />
+              {isCustomCron ? (
+                <div className="space-y-2">
+                  <Label htmlFor="task-cron">{t("scheduledTasks.cron")}</Label>
+                  <Input
+                    id="task-cron"
+                    onChange={(event) => setCron(event.target.value)}
+                    required
+                    value={cron}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {t("scheduledTasks.cronHint")}
+                  </p>
+                </div>
+              ) : null}
+              <div className="space-y-2">
+                <Label htmlFor="task-zone">
+                  {t("scheduledTasks.timezone")}
+                </Label>
+                <Input
+                  id="task-zone"
+                  onChange={(event) => setTimezone(event.target.value)}
+                  required
+                  value={timezone}
+                />
+              </div>
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-border pt-4">
             <Button
               disabled={saving}
               onClick={onClose}
@@ -1041,8 +1054,8 @@ function TaskHistory({ task, onClose }: { task: Task; onClose: () => void }) {
       }}
       open
     >
-      <DialogContent className="max-h-[85dvh] overflow-y-auto rounded-3xl">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[85dvh] flex-col rounded-3xl">
+        <DialogHeader className="shrink-0">
           <DialogTitle>{task.taskType}</DialogTitle>
           <DialogDescription>
             {t("scheduledTasks.historyTitle", {
@@ -1050,47 +1063,49 @@ function TaskHistory({ task, onClose }: { task: Task; onClose: () => void }) {
             })}
           </DialogDescription>
         </DialogHeader>
-        {Boolean(isLoading) && (
-          <p className="text-sm text-muted-foreground">
-            {t("scheduledTasks.loadingHistory")}
-          </p>
-        )}
-        {Boolean(error) && (
-          <p className="text-sm text-destructive" role="alert">
-            {t("scheduledTasks.historyFailed")}
-          </p>
-        )}
-        {data?.runs.length === 0 && (
-          <p className="py-8 text-center text-sm text-muted-foreground">
-            {t("scheduledTasks.noHistory")}
-          </p>
-        )}
-        {data?.runs.map((run) => (
-          <div className="border-b py-3 last:border-0" key={run.id}>
-            <div className="flex items-center justify-between gap-3 text-sm">
-              <span className="flex items-center gap-2">
-                <Clock3 size={15} />
-                {date(run.startedAt, language, task.schedule.timezone)}
-              </span>
-              <span>
-                {labels[run.status] ? t(labels[run.status]) : run.status}
-              </span>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {Boolean(isLoading) && (
+            <p className="text-sm text-muted-foreground">
+              {t("scheduledTasks.loadingHistory")}
+            </p>
+          )}
+          {Boolean(error) && (
+            <p className="text-sm text-destructive" role="alert">
+              {t("scheduledTasks.historyFailed")}
+            </p>
+          )}
+          {data?.runs.length === 0 && (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              {t("scheduledTasks.noHistory")}
+            </p>
+          )}
+          {data?.runs.map((run) => (
+            <div className="border-b py-3 last:border-0" key={run.id}>
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <span className="flex items-center gap-2">
+                  <Clock3 size={15} />
+                  {date(run.startedAt, language, task.schedule.timezone)}
+                </span>
+                <span>
+                  {labels[run.status] ? t(labels[run.status]) : run.status}
+                </span>
+              </div>
+              {Boolean(run.errorMessage) && (
+                <p className="mt-2 text-xs text-destructive">
+                  {t(run.errorMessage ?? "")}
+                </p>
+              )}
+              {Boolean(run.chatId) && (
+                <Link
+                  className="mt-2 inline-block text-sm text-primary hover:underline"
+                  href={`/chat/${run.chatId}`}
+                >
+                  {t("scheduledTasks.openResult")}
+                </Link>
+              )}
             </div>
-            {Boolean(run.errorMessage) && (
-              <p className="mt-2 text-xs text-destructive">
-                {t(run.errorMessage ?? "")}
-              </p>
-            )}
-            {Boolean(run.chatId) && (
-              <Link
-                className="mt-2 inline-block text-sm text-primary hover:underline"
-                href={`/chat/${run.chatId}`}
-              >
-                {t("scheduledTasks.openResult")}
-              </Link>
-            )}
-          </div>
-        ))}
+          ))}
+        </div>
       </DialogContent>
     </Dialog>
   );

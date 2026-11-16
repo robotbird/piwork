@@ -229,7 +229,11 @@ export function SkillLinkInstaller({
               placeholder={t("skills.installLinkPlaceholder")}
               value={url}
             />
-            <Button disabled={phase !== null || !recognized} onClick={inspect}>
+            <Button
+              disabled={phase !== null || !recognized}
+              onClick={inspect}
+              variant="contrast"
+            >
               {phase === "preview"
                 ? t("skills.inspecting")
                 : t("skills.inspectLink")}
@@ -352,7 +356,11 @@ export function SkillLinkInstaller({
           <p className="text-xs text-muted-foreground">
             {t("skills.previewExpiryHint")}
           </p>
-          <Button disabled={phase !== null || !selected.size} onClick={install}>
+          <Button
+            disabled={phase !== null || !selected.size}
+            onClick={install}
+            variant="contrast"
+          >
             {phase === "install"
               ? t("skills.installing")
               : t("skills.installSelected", { count: selected.size })}

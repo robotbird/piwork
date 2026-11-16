@@ -683,8 +683,8 @@ function McpServerDialog({
 
   return (
     <Dialog onOpenChange={handleOpenChange} open={open}>
-      <DialogContent className="gap-5 sm:max-w-lg">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[85dvh] flex-col gap-5 sm:max-w-lg">
+        <DialogHeader className="shrink-0">
           <DialogTitle className="text-lg">
             {isEdit ? t("mcpServers.editTitle") : t("mcpServers.createTitle")}
           </DialogTitle>
@@ -692,139 +692,149 @@ function McpServerDialog({
             {t("mcpServers.dialogDescription")}
           </DialogDescription>
         </DialogHeader>
-        <form className="grid gap-4" onSubmit={handleSubmit}>
-          <div className="grid gap-2">
-            <Label htmlFor="mcp-server-name">{t("mcpServers.fieldName")}</Label>
-            <Input
-              disabled={isEdit}
-              id="mcp-server-name"
-              onChange={handleNameChange}
-              placeholder={t("mcpServers.fieldNamePlaceholder")}
-              value={name}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="mcp-server-description">
-              {t("mcpServers.fieldDescription")}
-            </Label>
-            <Input
-              id="mcp-server-description"
-              onChange={handleDescriptionChange}
-              placeholder={t("mcpServers.fieldDescriptionPlaceholder")}
-              value={description}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label>{t("mcpServers.fieldTransport")}</Label>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {transportOptions.map((option) => {
-                const Icon = option.icon;
-                const active = transport === option.key;
-                return (
-                  <button
-                    className={cn(
-                      "flex min-h-20 w-full flex-col items-start rounded-xl border border-border bg-card px-4 py-3 text-left transition-colors",
-                      active
-                        ? "border-primary/60 bg-primary/5"
-                        : "hover:bg-muted/45"
-                    )}
-                    key={option.key}
-                    onClick={handleTransport(option.key)}
-                    type="button"
-                  >
-                    <span className="flex items-center gap-2 text-sm font-medium">
-                      <Icon aria-hidden="true" className="size-4" />
-                      {option.label}
-                    </span>
-                    <span className="mt-1 text-xs text-muted-foreground">
-                      {option.description}
-                    </span>
-                  </button>
-                );
-              })}
+        <form
+          className="flex min-h-0 flex-1 flex-col gap-4"
+          onSubmit={handleSubmit}
+        >
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
+            <div className="grid gap-2">
+              <Label htmlFor="mcp-server-name">
+                {t("mcpServers.fieldName")}
+              </Label>
+              <Input
+                disabled={isEdit}
+                id="mcp-server-name"
+                onChange={handleNameChange}
+                placeholder={t("mcpServers.fieldNamePlaceholder")}
+                value={name}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="mcp-server-description">
+                {t("mcpServers.fieldDescription")}
+              </Label>
+              <Input
+                id="mcp-server-description"
+                onChange={handleDescriptionChange}
+                placeholder={t("mcpServers.fieldDescriptionPlaceholder")}
+                value={description}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>{t("mcpServers.fieldTransport")}</Label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {transportOptions.map((option) => {
+                  const Icon = option.icon;
+                  const active = transport === option.key;
+                  return (
+                    <button
+                      className={cn(
+                        "flex min-h-20 w-full flex-col items-start rounded-xl border border-border bg-card px-4 py-3 text-left transition-colors",
+                        active
+                          ? "border-primary/60 bg-primary/5"
+                          : "hover:bg-muted/45"
+                      )}
+                      key={option.key}
+                      onClick={handleTransport(option.key)}
+                      type="button"
+                    >
+                      <span className="flex items-center gap-2 text-sm font-medium">
+                        <Icon aria-hidden="true" className="size-4" />
+                        {option.label}
+                      </span>
+                      <span className="mt-1 text-xs text-muted-foreground">
+                        {option.description}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            {transport === "stdio" ? (
+              <>
+                <div className="grid gap-2">
+                  <Label htmlFor="mcp-server-command">
+                    {t("mcpServers.fieldCommand")}
+                  </Label>
+                  <Input
+                    id="mcp-server-command"
+                    onChange={handleCommandChange}
+                    placeholder={t("mcpServers.fieldCommandPlaceholder")}
+                    value={command}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="mcp-server-args">
+                    {t("mcpServers.fieldArgs")}
+                  </Label>
+                  <Textarea
+                    className="max-h-40 overflow-y-auto"
+                    id="mcp-server-args"
+                    onChange={handleArgsChange}
+                    placeholder={t("mcpServers.fieldArgsPlaceholder")}
+                    rows={3}
+                    value={argsText}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="mcp-server-env">
+                    {t("mcpServers.fieldEnv")}
+                  </Label>
+                  <Textarea
+                    className="max-h-40 overflow-y-auto"
+                    id="mcp-server-env"
+                    onChange={handleEnvChange}
+                    placeholder={t("mcpServers.fieldEnvPlaceholder")}
+                    rows={3}
+                    value={envText}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="grid gap-2">
+                  <Label htmlFor="mcp-server-url">
+                    {t("mcpServers.fieldUrl")}
+                  </Label>
+                  <Input
+                    id="mcp-server-url"
+                    onChange={handleUrlChange}
+                    placeholder={t("mcpServers.fieldUrlPlaceholder")}
+                    value={url}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="mcp-server-headers">
+                    {t("mcpServers.fieldHeaders")}
+                  </Label>
+                  <Textarea
+                    className="max-h-40 overflow-y-auto"
+                    id="mcp-server-headers"
+                    onChange={handleHeadersChange}
+                    placeholder={t("mcpServers.fieldHeadersPlaceholder")}
+                    rows={3}
+                    value={headersText}
+                  />
+                </div>
+              </>
+            )}
+            <div className="flex items-center justify-between rounded-xl border border-border px-4 py-3">
+              <div>
+                <p className="text-sm font-medium">
+                  {t("mcpServers.fieldEnabled")}
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {t("mcpServers.fieldEnabledHint")}
+                </p>
+              </div>
+              <Switch
+                aria-label={t("mcpServers.fieldEnabled")}
+                checked={enabled}
+                onCheckedChange={setEnabled}
+              />
             </div>
           </div>
-          {transport === "stdio" ? (
-            <>
-              <div className="grid gap-2">
-                <Label htmlFor="mcp-server-command">
-                  {t("mcpServers.fieldCommand")}
-                </Label>
-                <Input
-                  id="mcp-server-command"
-                  onChange={handleCommandChange}
-                  placeholder={t("mcpServers.fieldCommandPlaceholder")}
-                  value={command}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="mcp-server-args">
-                  {t("mcpServers.fieldArgs")}
-                </Label>
-                <Textarea
-                  id="mcp-server-args"
-                  onChange={handleArgsChange}
-                  placeholder={t("mcpServers.fieldArgsPlaceholder")}
-                  rows={3}
-                  value={argsText}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="mcp-server-env">
-                  {t("mcpServers.fieldEnv")}
-                </Label>
-                <Textarea
-                  id="mcp-server-env"
-                  onChange={handleEnvChange}
-                  placeholder={t("mcpServers.fieldEnvPlaceholder")}
-                  rows={3}
-                  value={envText}
-                />
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="grid gap-2">
-                <Label htmlFor="mcp-server-url">
-                  {t("mcpServers.fieldUrl")}
-                </Label>
-                <Input
-                  id="mcp-server-url"
-                  onChange={handleUrlChange}
-                  placeholder={t("mcpServers.fieldUrlPlaceholder")}
-                  value={url}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="mcp-server-headers">
-                  {t("mcpServers.fieldHeaders")}
-                </Label>
-                <Textarea
-                  id="mcp-server-headers"
-                  onChange={handleHeadersChange}
-                  placeholder={t("mcpServers.fieldHeadersPlaceholder")}
-                  rows={3}
-                  value={headersText}
-                />
-              </div>
-            </>
-          )}
-          <div className="flex items-center justify-between rounded-xl border border-border px-4 py-3">
-            <div>
-              <p className="text-sm font-medium">
-                {t("mcpServers.fieldEnabled")}
-              </p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {t("mcpServers.fieldEnabledHint")}
-              </p>
-            </div>
-            <Switch
-              aria-label={t("mcpServers.fieldEnabled")}
-              checked={enabled}
-              onCheckedChange={setEnabled}
-            />
-          </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-border pt-4">
             <Button disabled={submitting} onClick={onClose} variant="outline">
               {t("common.cancel")}
             </Button>

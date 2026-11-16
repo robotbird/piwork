@@ -687,10 +687,10 @@ function SkillDetailDialog({
   const { t } = usePreferences();
   return (
     <Dialog onOpenChange={onOpenChange} open={Boolean(skill)}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto bg-card p-0 sm:max-w-[620px]">
+      <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden bg-card p-0 sm:max-w-[620px]">
         {skill ? (
           <>
-            <div className="border-b border-border px-6 pb-6 pt-7 sm:px-7">
+            <div className="shrink-0 border-b border-border px-6 pb-6 pt-7 sm:px-7">
               <DialogHeader className="pr-8">
                 <div className="flex items-start gap-4">
                   <SkillIcon icon={Icon} name={skill.name} />
@@ -738,7 +738,7 @@ function SkillDetailDialog({
                 </Button>
               ) : null}
             </div>
-            <div className="space-y-6 px-6 py-6 sm:px-7">
+            <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-6 sm:px-7">
               <section>
                 <h3 className="text-sm font-medium text-foreground">
                   {t("skills.keyCapabilities")}

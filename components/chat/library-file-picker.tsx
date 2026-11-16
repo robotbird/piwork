@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -225,11 +226,11 @@ export function LibraryFilePicker({
             })
           )}
         </div>
-        <div className="flex shrink-0 justify-end border-t border-border pt-3">
+        <DialogFooter className="shrink-0 border-t border-border pt-3">
           <Button onClick={handleDone} type="button">
             {t("libraryDone")}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

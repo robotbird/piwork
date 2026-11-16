@@ -814,8 +814,14 @@ export function ConversationsPage({
                     <div className="rounded-lg bg-muted/40 p-3">
                       <Messages messages={detail.messages} preview />
                     </div>
-                    <Button onClick={handleFull}>{t("fullRecord")}</Button>
-                    <Button onClick={handleCopy} variant="outline">
+                    <Button onClick={handleFull} variant="contrast">
+                      {t("fullRecord")}
+                    </Button>
+                    <Button
+                      className="rounded-full"
+                      onClick={handleCopy}
+                      variant="outline"
+                    >
                       <CopyIcon />
                       {t("copyId")}
                     </Button>
@@ -847,6 +853,7 @@ export function ConversationsPage({
             </div>
             <div className="flex items-center justify-between gap-3">
               <Button
+                className="rounded-full"
                 disabled={!fullDetail || fullDetail.page <= 1}
                 onClick={handleMessagePrevious}
                 variant="outline"
@@ -857,6 +864,7 @@ export function ConversationsPage({
                 {t("page", { page: fullDetail?.page || messagePage })}
               </span>
               <Button
+                className="rounded-full"
                 disabled={
                   !fullDetail || fullDetail.page * 50 >= fullDetail.total
                 }

@@ -728,8 +728,8 @@ function SkillInstallDialog({
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-h-[90dvh] gap-5 overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[90dvh] flex-col gap-5 overflow-hidden sm:max-w-2xl">
+        <DialogHeader className="shrink-0">
           <DialogTitle className="text-lg">
             {t("skills.installSkill")}
           </DialogTitle>
@@ -740,7 +740,7 @@ function SkillInstallDialog({
 
         <div
           aria-label={t("skills.installMethodTabs")}
-          className="flex w-fit gap-1 rounded-full border border-border bg-card p-1"
+          className="flex w-fit shrink-0 gap-1 rounded-full border border-border bg-card p-1"
           role="tablist"
         >
           {tabs.map((tab) => {
@@ -767,67 +767,72 @@ function SkillInstallDialog({
           })}
         </div>
 
-        {installTab === "link" ? (
-          <SkillLinkInstaller
-            onBusyChange={onBusyChange}
-            onInstalled={onInstalled}
-          />
-        ) : installTab === "archive" ? (
-          <div className="space-y-3">
-            <div>
-              <h3 className="text-sm font-medium">
-                {t("skills.installFromArchiveTitle")}
-              </h3>
-              <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
-                {t("skills.installFromArchiveDescription")}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {installTab === "link" ? (
+            <SkillLinkInstaller
+              onBusyChange={onBusyChange}
+              onInstalled={onInstalled}
+            />
+          ) : installTab === "archive" ? (
+            <div className="space-y-3">
+              <div>
+                <h3 className="text-sm font-medium">
+                  {t("skills.installFromArchiveTitle")}
+                </h3>
+                <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
+                  {t("skills.installFromArchiveDescription")}
+                </p>
+              </div>
+              <button
+                className={cn(
+                  "flex min-h-36 w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed bg-muted/25 px-5 text-center transition-colors hover:border-[var(--hairline-strong)] hover:bg-muted/45 disabled:pointer-events-none disabled:opacity-60",
+                  archiveDragActive
+                    ? "border-primary/60 bg-primary/5"
+                    : "border-border"
+                )}
+                disabled={installing}
+                onClick={onBrowseZip}
+                onDragLeave={onArchiveDragLeave}
+                onDragOver={onArchiveDragOver}
+                onDrop={onArchiveDrop}
+                type="button"
+              >
+                <FileArchiveIcon className="size-5 text-muted-foreground" />
+                <span className="text-sm font-medium">
+                  {t("skills.dropOrClickArchive")}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {t("skills.supportsSkillZip", {
+                    maxMB: SKILL_LIMIT_MB.total,
+                  })}
+                </span>
+              </button>
+              {archiveFile ? (
+                <p className="truncate text-xs text-muted-foreground">
+                  {t("skills.selectedArchive", { name: archiveFile.name })}
+                </p>
+              ) : null}
+              <Button
+                className="w-full"
+                disabled={!archiveFile || installing}
+                onClick={onInstallArchive}
+                variant="contrast"
+              >
+                {installing ? t("skills.installing") : t("skills.install")}
+              </Button>
+            </div>
+          ) : (
+            <div className="flex min-h-44 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-muted/25 px-5 py-8 text-center">
+              <StoreIcon className="size-5 text-muted-foreground" />
+              <p className="text-sm font-medium">
+                {t("skills.installTabMarketplace")}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {t("skills.marketplaceComingSoon")}
               </p>
             </div>
-            <button
-              className={cn(
-                "flex min-h-36 w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed bg-muted/25 px-5 text-center transition-colors hover:border-[var(--hairline-strong)] hover:bg-muted/45 disabled:pointer-events-none disabled:opacity-60",
-                archiveDragActive
-                  ? "border-primary/60 bg-primary/5"
-                  : "border-border"
-              )}
-              disabled={installing}
-              onClick={onBrowseZip}
-              onDragLeave={onArchiveDragLeave}
-              onDragOver={onArchiveDragOver}
-              onDrop={onArchiveDrop}
-              type="button"
-            >
-              <FileArchiveIcon className="size-5 text-muted-foreground" />
-              <span className="text-sm font-medium">
-                {t("skills.dropOrClickArchive")}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {t("skills.supportsSkillZip", { maxMB: SKILL_LIMIT_MB.total })}
-              </span>
-            </button>
-            {archiveFile ? (
-              <p className="truncate text-xs text-muted-foreground">
-                {t("skills.selectedArchive", { name: archiveFile.name })}
-              </p>
-            ) : null}
-            <Button
-              className="w-full"
-              disabled={!archiveFile || installing}
-              onClick={onInstallArchive}
-            >
-              {installing ? t("skills.installing") : t("skills.install")}
-            </Button>
-          </div>
-        ) : (
-          <div className="flex min-h-44 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-muted/25 px-5 py-8 text-center">
-            <StoreIcon className="size-5 text-muted-foreground" />
-            <p className="text-sm font-medium">
-              {t("skills.installTabMarketplace")}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {t("skills.marketplaceComingSoon")}
-            </p>
-          </div>
-        )}
+          )}
+        </div>
 
         <input
           accept=".zip,application/zip"

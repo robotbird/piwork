@@ -145,8 +145,8 @@ export function RoleDialog({
 
   return (
     <Dialog onOpenChange={handleOpenChange} open={open}>
-      <DialogContent className="sm:max-w-[480px]">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[85dvh] flex-col sm:max-w-[480px]">
+        <DialogHeader className="shrink-0">
           <DialogTitle>
             {isEdit ? t("admin.editRole") : t("admin.createRole")}
           </DialogTitle>
@@ -157,41 +157,47 @@ export function RoleDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form className="grid gap-4" onSubmit={handleSubmit}>
-          <div className="grid gap-2">
-            <Label htmlFor="role-name">{t("admin.name")}</Label>
-            <Input
-              aria-describedby={
-                error?.field === "name" ? "role-name-error" : undefined
-              }
-              aria-invalid={error?.field === "name" ? true : undefined}
-              id="role-name"
-              onChange={handleNameChange}
-              placeholder={t("admin.forExampleSkillDeveloper")}
-              value={name}
-            />
-            {error?.field === "name" ? (
-              <p
-                className="text-[13px] leading-5 text-destructive"
-                id="role-name-error"
-              >
-                {error.message}
-              </p>
-            ) : null}
+        <form
+          className="flex min-h-0 flex-1 flex-col gap-4"
+          onSubmit={handleSubmit}
+        >
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
+            <div className="grid gap-2">
+              <Label htmlFor="role-name">{t("admin.name")}</Label>
+              <Input
+                aria-describedby={
+                  error?.field === "name" ? "role-name-error" : undefined
+                }
+                aria-invalid={error?.field === "name" ? true : undefined}
+                id="role-name"
+                onChange={handleNameChange}
+                placeholder={t("admin.forExampleSkillDeveloper")}
+                value={name}
+              />
+              {error?.field === "name" ? (
+                <p
+                  className="text-[13px] leading-5 text-destructive"
+                  id="role-name-error"
+                >
+                  {error.message}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="role-description">{t("admin.description")}</Label>
+              <Textarea
+                className="max-h-40 overflow-y-auto"
+                id="role-description"
+                onChange={handleDescriptionChange}
+                placeholder={t("admin.optionalBrieflyDescribeWhatThisRoleIs")}
+                rows={3}
+                value={description}
+              />
+            </div>
           </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="role-description">{t("admin.description")}</Label>
-            <Textarea
-              id="role-description"
-              onChange={handleDescriptionChange}
-              placeholder={t("admin.optionalBrieflyDescribeWhatThisRoleIs")}
-              rows={3}
-              value={description}
-            />
-          </div>
-
-          <DialogFooter className="mt-1">
+          <DialogFooter className="shrink-0 border-t border-border pt-4">
             <Button onClick={onClose} type="button" variant="outline">
               {t("common.cancel")}
             </Button>
