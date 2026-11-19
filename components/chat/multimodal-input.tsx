@@ -8,7 +8,6 @@ import {
   FolderIcon,
   HammerIcon,
   LibraryBigIcon,
-  MicIcon,
   PaperclipIcon,
   PlusIcon,
 } from "lucide-react";
@@ -775,10 +774,6 @@ function PureMultimodalInput({
     [setAttachments]
   );
 
-  const handleVoiceInput = useCallback(() => {
-    toast.info(t("chat.voiceInputIsComingSoon"));
-  }, [t]);
-
   // 「+」菜单的「从我的文档选择」：与项目首页一致，打开受控文档库弹窗
   const openLibraryPicker = useCallback(() => {
     setLibraryPickerOpen(true);
@@ -1071,22 +1066,12 @@ function PureMultimodalInput({
               onModelChange={onModelChange}
               selectedModelId={selectedModelId}
             />
-            <Button
-              aria-label={t("chat.voiceInput")}
-              className="size-10 rounded-full text-foreground hover:bg-muted"
-              onClick={handleVoiceInput}
-              size="icon-sm"
-              type="button"
-              variant="ghost"
-            >
-              <MicIcon className="size-[19px]" />
-            </Button>
             {isGenerating ? (
               <StopButton setMessages={setMessages} stop={stopGeneration} />
             ) : (
               <PromptInputSubmit
                 className={cn(
-                  "size-10 rounded-full border-0 transition-colors duration-150",
+                  "size-10 rounded-full transition-colors duration-150",
                   canSubmit
                     ? "bg-primary text-primary-foreground hover:bg-primary/90"
                     : "bg-[#b8d4ff] text-white"
