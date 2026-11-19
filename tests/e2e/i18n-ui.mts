@@ -153,6 +153,13 @@ try {
   await expect(
     page.getByRole("heading", { exact: true, name: "Scheduled tasks" })
   ).toBeVisible();
+  const taskComposerButtons = page.locator(".composer-plain button");
+  await expect(taskComposerButtons).toHaveCount(3);
+  await Promise.all(
+    (await taskComposerButtons.all()).map((button) =>
+      expect(button).toHaveCSS("height", "30px")
+    )
+  );
   await expect(
     page.getByText("Every Monday at 09:00", { exact: false })
   ).toBeVisible();
@@ -183,7 +190,12 @@ try {
   await page.getByRole("button", { exact: true, name: "English" }).click();
   await openManual("Create task manually");
   await expect(page.getByRole("dialog")).toContainText("Create task manually");
-  await expect(page.getByRole("dialog")).toContainText("Cron expression");
+  await expect(
+    page.getByRole("dialog").getByRole("combobox", {
+      exact: true,
+      name: "Schedule",
+    })
+  ).toBeVisible();
   assert.deepEqual(errors, []);
   console.log(
     "i18n UI passed: documents keep filter state across locale switches; schedules, statuses and task editor translate; user data stays unchanged."

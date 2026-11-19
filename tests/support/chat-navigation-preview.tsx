@@ -19,21 +19,11 @@ function Preview() {
     () => window.history.pushState({}, "", "/"),
     []
   );
-  const handleSend = useCallback(() => {
-    window.history.pushState({}, "", `/chat/${chat.chatId}`);
-    chat.sendMessage({
-      parts: [{ text: "新对话消息", type: "text" }],
-      role: "user",
-    });
-  }, [chat.chatId, chat.sendMessage]);
   return (
     <>
       <SidebarHistory user={{ id: "fixture-user", type: "regular" }} />
       <button onClick={handleNewChat} type="button">
         新对话
-      </button>
-      <button onClick={handleSend} type="button">
-        发送
       </button>
       <ChatHeader
         chatId={chat.chatId}

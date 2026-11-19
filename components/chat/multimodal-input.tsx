@@ -1071,7 +1071,7 @@ function PureMultimodalInput({
             ) : (
               <PromptInputSubmit
                 className={cn(
-                  "size-10 rounded-full transition-colors duration-150",
+                  "size-[30px] rounded-full transition-colors duration-150",
                   canSubmit
                     ? "bg-primary text-primary-foreground hover:bg-primary/90"
                     : "bg-[#b8d4ff] text-white"
@@ -1086,7 +1086,7 @@ function PureMultimodalInput({
                 status={status}
                 variant="secondary"
               >
-                <ArrowUpIcon className="size-5" />
+                <ArrowUpIcon className="size-4" />
               </PromptInputSubmit>
             )}
           </PromptInputTools>
@@ -1104,7 +1104,7 @@ function PureMultimodalInput({
                 <button
                   aria-label={t("chat.chooseProject")}
                   className={cn(
-                    "flex h-8 min-w-0 items-center gap-2 rounded-lg px-2 transition-colors hover:bg-background hover:text-foreground",
+                    "flex h-[30px] min-w-0 items-center gap-2 rounded-lg px-2 transition-colors hover:bg-background hover:text-foreground",
                     selectedProject &&
                       "bg-background/70 font-medium text-foreground"
                   )}
@@ -1286,13 +1286,13 @@ function PureAttachmentsMenuButton({
       <DropdownMenuTrigger asChild>
         <Button
           aria-label={t("uploadMenu")}
-          className="composer-plus size-10 shrink-0 cursor-pointer rounded-full p-0 text-foreground transition-colors duration-150 hover:bg-muted focus-visible:bg-muted data-[state=open]:bg-muted"
+          className="composer-plus size-[30px] shrink-0 cursor-pointer rounded-full p-0 text-foreground transition-colors duration-150 hover:bg-muted focus-visible:bg-muted data-[state=open]:bg-muted"
           data-testid="attachments-button"
           disabled={disabled || isGenerating}
           size="icon"
           variant="ghost"
         >
-          <PlusIcon className="size-5" />
+          <PlusIcon className="size-4" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
@@ -1409,7 +1409,7 @@ function PureModelSelectorCompact({
     <ModelSelector onOpenChange={setOpen} open={open}>
       <ModelSelectorTrigger asChild>
         <Button
-          className="h-8 max-w-[156px] gap-1 rounded-full border-0 bg-muted px-3 text-[13px] font-normal text-foreground shadow-none transition-colors hover:bg-secondary aria-expanded:bg-muted dark:bg-transparent dark:hover:bg-white/5 dark:aria-expanded:bg-transparent"
+          className="h-[30px] max-w-[156px] gap-1 rounded-full border-0 bg-muted px-3 text-[13px] font-normal text-foreground shadow-none transition-colors hover:bg-secondary aria-expanded:bg-muted dark:bg-transparent dark:hover:bg-white/5 dark:aria-expanded:bg-transparent"
           data-testid="model-selector"
           variant="ghost"
         >
@@ -1467,7 +1467,7 @@ function PureStopButton({
   return (
     <Button
       aria-label={t("chat.stopGenerating")}
-      className="size-10 rounded-full bg-primary p-1 text-primary-foreground transition-all duration-150 hover:bg-primary/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground/50"
+      className="size-[30px] rounded-full bg-primary p-1 text-primary-foreground transition-all duration-150 hover:bg-primary/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground/50"
       data-testid="stop-button"
       onClick={handleClick}
     >

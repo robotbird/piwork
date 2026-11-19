@@ -272,8 +272,9 @@ export function ScheduledTasksPanel() {
       return;
     }
     const resize = () => {
-      // 固定单行可用宽度，避免展开后的宽度变化导致布局反复切换。
-      textarea.style.width = `${Math.max(composer.clientWidth - 144, 1)}px`;
+      // Measure at the single-line width to avoid oscillating between layouts.
+      // The buttons, gaps, and horizontal padding take up 130px.
+      textarea.style.width = `${Math.max(composer.clientWidth - 130, 1)}px`;
       textarea.style.paddingInline = "0px";
       textarea.style.height = "0px";
       const needsMultiline = textarea.scrollHeight > 40;
@@ -466,7 +467,7 @@ export function ScheduledTasksPanel() {
         />
         <form
           className={cn(
-            "composer-plain grid min-h-14 grid-cols-[40px_minmax(0,1fr)_32px_32px] items-center gap-x-2 border border-[var(--hairline-strong)] bg-card px-2 py-[7px] shadow-[var(--shadow-whisper)]",
+            "composer-plain grid min-h-14 grid-cols-[30px_minmax(0,1fr)_30px_30px] items-center gap-x-2 border border-[var(--hairline-strong)] bg-card px-2 py-[7px] shadow-[var(--shadow-whisper)]",
             multiline ? "gap-y-2 rounded-[28px]" : "rounded-full"
           )}
           onSubmit={(event) => {
@@ -482,13 +483,13 @@ export function ScheduledTasksPanel() {
             <DropdownMenuTrigger asChild>
               <Button
                 aria-label={t("chat.uploadMenu")}
-                className="composer-plus col-start-1 row-start-2 size-10 shrink-0 cursor-pointer rounded-full p-0 text-foreground transition-colors duration-150 hover:bg-muted focus-visible:bg-muted data-[state=open]:bg-muted"
+                className="composer-plus col-start-1 row-start-2 size-[30px] shrink-0 cursor-pointer rounded-full p-0 text-foreground transition-colors duration-150 hover:bg-muted focus-visible:bg-muted data-[state=open]:bg-muted"
                 disabled={uploadQueue.length > 0 || librarySelecting}
                 size="icon"
                 type="button"
                 variant="ghost"
               >
-                <Plus className="size-5" />
+                <Plus className="size-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent
@@ -563,13 +564,13 @@ export function ScheduledTasksPanel() {
             <TooltipTrigger asChild>
               <Button
                 aria-label={t("scheduledTasks.voice")}
-                className="col-start-3 row-start-2 size-8 shrink-0 rounded-full text-foreground transition-colors duration-150 hover:bg-muted"
+                className="col-start-3 row-start-2 size-[30px] shrink-0 rounded-full text-foreground transition-colors duration-150 hover:bg-muted"
                 onClick={() => toast.info(t("scheduledTasks.voiceSoon"))}
                 size="icon"
                 type="button"
                 variant="ghost"
               >
-                <Mic className="size-5" />
+                <Mic className="size-4" />
               </Button>
             </TooltipTrigger>
             <TooltipContent>{t("scheduledTasks.voice")}</TooltipContent>
@@ -578,10 +579,11 @@ export function ScheduledTasksPanel() {
             <TooltipTrigger asChild>
               <Button
                 aria-label={t("scheduledTasks.scheduleWithAI")}
-                className="col-start-4 row-start-2 size-8 shrink-0 rounded-full"
+                className="col-start-4 row-start-2 size-[30px] shrink-0 rounded-full"
                 disabled={
                   !query.trim() || uploadQueue.length > 0 || librarySelecting
                 }
+                size="icon"
                 type="submit"
               >
                 <ArrowUp className="size-4" />

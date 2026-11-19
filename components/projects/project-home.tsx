@@ -115,8 +115,9 @@ export function ProjectHome({
       return;
     }
     const resize = () => {
-      // 用固定的单行可用宽度判断布局，避免展开后变宽又收起。
-      textarea.style.width = `${Math.max(composer.clientWidth - 104, 1)}px`;
+      // Measure at the single-line width to avoid oscillating between layouts.
+      // The buttons, gaps, and horizontal padding take up 92px.
+      textarea.style.width = `${Math.max(composer.clientWidth - 92, 1)}px`;
       textarea.style.paddingInline = "0px";
       textarea.style.height = "0px";
       const needsMultiline = textarea.scrollHeight > 40;
@@ -375,7 +376,7 @@ export function ProjectHome({
 
       <form
         className={cn(
-          "composer-plain mt-8 grid min-h-14 grid-cols-[40px_minmax(0,1fr)_32px] items-center gap-x-2 border border-[var(--hairline-strong)] bg-card px-2 py-[7px] shadow-[var(--shadow-whisper)]",
+          "composer-plain mt-8 grid min-h-14 grid-cols-[30px_minmax(0,1fr)_30px] items-center gap-x-2 border border-[var(--hairline-strong)] bg-card px-2 py-[7px] shadow-[var(--shadow-whisper)]",
           multiline ? "gap-y-2 rounded-[28px]" : "rounded-full"
         )}
         ref={composerRef}
@@ -392,13 +393,13 @@ export function ProjectHome({
           <DropdownMenuTrigger asChild>
             <Button
               aria-label={t("uploadMenu")}
-              className="composer-plus col-start-1 row-start-2 size-10 shrink-0 cursor-pointer rounded-full p-0 text-foreground transition-colors duration-150 hover:bg-muted focus-visible:bg-muted data-[state=open]:bg-muted"
+              className="composer-plus col-start-1 row-start-2 size-[30px] shrink-0 cursor-pointer rounded-full p-0 text-foreground transition-colors duration-150 hover:bg-muted focus-visible:bg-muted data-[state=open]:bg-muted"
               disabled={!isOwner || uploading || libraryBusy}
               size="icon"
               type="button"
               variant="ghost"
             >
-              <PlusIcon className="size-5" />
+              <PlusIcon className="size-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -464,8 +465,9 @@ export function ProjectHome({
         />
         <Button
           aria-label={t("startChatAction")}
-          className="col-start-3 row-start-2 size-8 shrink-0 rounded-full"
+          className="col-start-3 row-start-2 size-[30px] shrink-0 rounded-full"
           disabled={!input.trim() || creating}
+          size="icon"
           type="submit"
         >
           <ArrowUpIcon className="size-4" />

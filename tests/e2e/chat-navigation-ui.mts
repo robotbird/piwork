@@ -4,8 +4,10 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chromium } from "@playwright/test";
+import { chromium, expect } from "@playwright/test";
+import tailwindcss from "@tailwindcss/postcss";
 import { build } from "esbuild";
+import postcss from "postcss";
 
 const directory = await mkdtemp(join(tmpdir(), "piwork-chat-navigation-"));
 let releaseStream!: () => void;
@@ -26,6 +28,11 @@ const server = createServer(async (request, response) => {
     response.end(
       'data: {"type":"text-end","id":"answer"}\n\ndata: {"type":"finish"}\n\ndata: [DONE]\n\n'
     );
+    return;
+  }
+  if (request.url === "/base.css") {
+    response.setHeader("content-type", "text/css");
+    response.end(await readFile(join(directory, "base.css")));
     return;
   }
   const filename = request.url === "/preview.js" ? "preview.js" : "index.html";
@@ -84,9 +91,14 @@ try {
       },
     ],
   });
+  const css = await postcss([tailwindcss()]).process(
+    await readFile("app/globals.css", "utf8"),
+    { from: "app/globals.css" }
+  );
+  await writeFile(join(directory, "base.css"), css.css);
   await writeFile(
     join(directory, "index.html"),
-    '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script src="/preview.js"></script></body></html>'
+    '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/base.css"></head><body><div id="root"></div><script src="/preview.js"></script></body></html>'
   );
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -207,6 +219,11 @@ try {
   );
   await page.goto(`http://127.0.0.1:${address.port}`);
   await page.getByRole("link", { name: "另一段历史" }).waitFor();
+  await Promise.all(
+    ["attachments-button", "model-selector", "send-button"].map((id) =>
+      expect(page.getByTestId(id)).toHaveCSS("height", "30px")
+    )
+  );
   const input = page.getByTestId("multimodal-input");
   await page.waitForFunction(
     () =>
@@ -230,11 +247,13 @@ try {
     "",
     "clearing a full draft stays empty"
   );
-  await page.getByRole("button", { exact: true, name: "发送" }).click();
+  await input.fill("新对话消息");
+  await page.getByTestId("send-button").click();
   await page.getByRole("button", { exact: true, name: "分享对话" }).waitFor();
   await page.getByRole("link", { name: "刚创建的对话" }).waitFor();
   assert(createdId);
   assert.equal(await page.getByTestId("status").textContent(), "streaming");
+  await expect(page.getByTestId("stop-button")).toHaveCSS("height", "30px");
   await page.getByTestId("messages").getByText("正在生成的回答").waitFor();
   assert.equal(
     await page.locator("header button").count(),
