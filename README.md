@@ -164,7 +164,6 @@ graph LR
 - [ ] CONTRIBUTING.md and SECURITY.md
 - [ ] More UI languages
 - [ ] OpenSandbox production provider hardening
-- [ ] Durable execution pilot (currently experimental)
 
 <p align="right">(<a href="#readme-top">back to top ⬆️</a>)</p>
 

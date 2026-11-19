@@ -209,9 +209,7 @@ export class SandboxRpcBackend implements RuntimeBackend {
   async open(spec: RuntimeSpec): Promise<RuntimeSession> {
     if (
       spec.projectSources &&
-      (!this.options.projectDocuments ||
-        !spec.workspaceDir ||
-        spec.lane === "durable_sandbox")
+      (!this.options.projectDocuments || !spec.workspaceDir)
     ) {
       throw new Error("runtime:project-documents:sandbox-rpc-loader-required");
     }

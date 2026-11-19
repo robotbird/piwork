@@ -54,7 +54,7 @@ test("matrix routes platform search without workspace to lightweight; LocalRpc s
   assert.equal(HOST_TOOLS_BRIDGEABLE.has("platform_web_search"), true);
 });
 
-test("willRunSandbox：与 resolveBackend 的实际沙箱选择保持一致（matrix/all/durable）", () => {
+test("willRunSandbox matches sandbox selection in matrix and all modes", () => {
   const matrix = {
     PIWORK_SANDBOX_PROVIDER: "docker",
     PIWORK_SANDBOX_ROUTING: undefined,
@@ -74,11 +74,6 @@ test("willRunSandbox：与 resolveBackend 的实际沙箱选择保持一致（ma
     willRunSandbox({ workspaceDir: null }, all),
     true,
     "all 路由 → 全量沙箱"
-  );
-  assert.equal(
-    willRunSandbox({ lane: "durable_sandbox", workspaceDir: null }, all),
-    false,
-    "durable lane 走 DurableBackend"
   );
   assert.equal(
     willRunSandbox(

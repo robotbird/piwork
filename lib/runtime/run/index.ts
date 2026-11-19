@@ -21,14 +21,11 @@ import {
   createWebSearchHostTool,
   WEB_SEARCH_HOST_TOOL_NAME,
 } from "@/lib/web-access/host-tool";
-import { DurableBackend } from "../backends/durable/backend";
-import { readDurableChatConfig } from "../backends/durable/chat-policy";
 import { InProcessBackend } from "../backends/in-process/backend";
 import {
   RoutingRuntimeBackend,
   requiresSandbox,
 } from "../backends/routing/backend";
-import { ExplicitDurableRuntimeBackend } from "../backends/routing/explicit-durable";
 import {
   type SandboxInferenceOptions,
   SandboxRpcBackend,
@@ -46,7 +43,6 @@ import {
 } from "../sandbox/configuration";
 import { LeasingSandboxProvider } from "../sandbox/leasing";
 import { dbSandboxRegistry } from "../sandbox/registry";
-import { buildDurableChatBackend } from "./durable-chat";
 import { RunManager } from "./run-manager";
 
 /**
@@ -54,9 +50,6 @@ import { RunManager } from "./run-manager";
  * 挂 globalThis Symbol 键使 dev HMR 下 run 状态存活；进程全量重启则
  * LiveRun 丢失，由 attach 落空 → failZombieRuns 兜底（§2.12）。
  *
- * - PIWORK_RUNTIME_BACKEND=durable 切换实验性 Pi Durable 后端
- *   （docs/research/pi-durable-evaluation.md D0；本装配仍无持久 factory/Worker，
- *   NODE_ENV=production 时 DurableBackend 拒绝默认 MemoryStorage）。
  * - PIWORK_SANDBOX_PROVIDER=docker|opensandbox 切换沙箱装配（spec §6
  *   Phase 2/3/5；opensandbox-integration-spec.md §7 组装）。默认未设置 =
  *   in-process 行为不变。fail-closed：未知取值/缺必配直接抛错，绝不静默回退
@@ -188,11 +181,6 @@ function resolveBackend(): {
   backendKindFor?: (spec: RuntimeSpec) => "in_process" | "sandbox_rpc";
 } {
   if (process.env.PIWORK_SANDBOX_PROVIDER) {
-    if (process.env.PIWORK_RUNTIME_BACKEND === "durable") {
-      throw new Error(
-        "runtime:sandbox:bad-config:PIWORK_SANDBOX_PROVIDER 与 durable 实验后端不可同时启用"
-      );
-    }
     const routing = process.env.PIWORK_SANDBOX_ROUTING ?? "matrix";
     if (routing !== "matrix" && routing !== "all") {
       throw new Error(
@@ -216,10 +204,7 @@ function resolveBackend(): {
     };
   }
   return {
-    backend:
-      process.env.PIWORK_RUNTIME_BACKEND === "durable"
-        ? new DurableBackend()
-        : new InProcessBackend(registerGeneratedFile),
+    backend: new InProcessBackend(registerGeneratedFile),
     backendKind: "in_process",
   };
 }
@@ -237,33 +222,20 @@ const globalScope = globalThis as Record<symbol, RunManagerGlobal | undefined>;
 globalScope[RUN_MANAGER_KEY] ??= {};
 const runtimeGlobal = globalScope[RUN_MANAGER_KEY];
 
-const normal = resolveBackend();
-const durableChatConfig = readDurableChatConfig();
-const resolved = {
-  backend: new ExplicitDurableRuntimeBackend(
-    normal.backend,
-    durableChatConfig ? buildDurableChatBackend(durableChatConfig) : undefined
-  ),
-  backendKindFor: (spec: RuntimeSpec) =>
-    spec.lane === "durable_sandbox"
-      ? ("durable_sandbox" as const)
-      : (normal.backendKindFor?.(spec) ?? normal.backendKind ?? "in_process"),
-};
+const resolved = resolveBackend();
 
 runtimeGlobal.workerId ??= globalThis.crypto.randomUUID();
 runtimeGlobal.manager ??= new RunManager({
   authorizeStart: async (input) =>
     authorizeRoleRun(input.userId, input.spec.model),
-  backend: resolved.backend,
-  backendKindFor: resolved.backendKindFor,
+  ...resolved,
   checkRecordedQuota: checkUserTokenQuota,
   eventStore: new PostgresEventStore(),
   messageStore: {
     upsertAssistantMessage: async ({ chatId, id, parts }) => {
       await upsertMessage({ chatId, id, parts });
-      // 协作实时：assistant 终态幂等 upsert 后通知房间（经典/Durable/
-      // 定时任务共用此回调，actorId 无法在此取得运行归属 → null，
-      // 客户端不 做 self-skip，重拉为幂等操作）。
+      // Chat and scheduled runs share this callback. A null actorId lets all
+      // room members refresh after the idempotent upsert.
       publishChatMessage({ actorId: null, chatId, role: "assistant" });
       publishChatRun({ actorId: null, chatId, phase: "finished" });
     },

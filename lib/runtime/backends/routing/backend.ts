@@ -34,15 +34,13 @@ export function requiresSandbox(spec: RuntimeSpec): boolean {
 
 type RoutingEnv = Record<string, string | undefined>;
 
-/** Mirrors resolveBackend's sandbox selection so callers (chat route,
- * scheduled-task executor) assemble bridged tools/prompts for runs that will
- * actually execute in a sandbox — both matrix (workspace runs) and all
- * routing shapes. Durable lanes route to DurableBackend and are excluded. */
+/** Mirrors resolveBackend's sandbox selection so chat and scheduled tasks can
+ * assemble the right prompts and bridged tools for matrix and all routing. */
 export function willRunSandbox(
-  spec: { lane?: RuntimeSpec["lane"]; workspaceDir: string | null },
+  spec: Pick<RuntimeSpec, "workspaceDir">,
   env: RoutingEnv = process.env
 ): boolean {
-  if (!env.PIWORK_SANDBOX_PROVIDER || spec.lane === "durable_sandbox") {
+  if (!env.PIWORK_SANDBOX_PROVIDER) {
     return false;
   }
   if (env.PIWORK_SANDBOX_ROUTING === "all") {

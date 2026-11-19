@@ -531,9 +531,8 @@ export type Suggestion = InferSelectModel<typeof suggestion>;
 export const agentRun = pgTable(
   "AgentRun",
   {
-    /** durable_sandbox is an explicit non-production probe; SQL remains varchar. */
     backend: varchar("backend", {
-      enum: ["in_process", "sandbox_rpc", "durable_sandbox"],
+      enum: ["in_process", "sandbox_rpc"],
     })
       .notNull()
       .default("in_process"),

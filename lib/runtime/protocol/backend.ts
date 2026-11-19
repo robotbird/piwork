@@ -20,10 +20,7 @@ export type RuntimeSession = {
   close: (reason: string) => Promise<void>;
 };
 
-export type RuntimeBackendKind =
-  | "in_process"
-  | "sandbox_rpc"
-  | "durable_sandbox";
+export type RuntimeBackendKind = "in_process" | "sandbox_rpc";
 
 export type RuntimeBackend = {
   open: (spec: RuntimeSpec) => Promise<RuntimeSession>;

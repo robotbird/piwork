@@ -29,9 +29,6 @@ importers:
       '@codemirror/view':
         specifier: ^6.43.5
         version: 6.43.5
-      '@earendil-works/chord':
-        specifier: 1.5.2
-        version: 1.5.2(esbuild@0.28.2)(react@19.2.7)
       '@earendil-works/pi-agent-core':
         specifier: 1.5.2
         version: 1.5.2(@aws-sdk/credential-provider-node@3.972.83)(@smithy/signature-v4@5.7.3)(bufferutil@4.0.9)(undici@8.12.3)(zod@4.4.3)
@@ -41,9 +38,6 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 1.5.2
         version: 1.5.2(@aws-sdk/credential-provider-node@3.972.83)(@smithy/signature-v4@5.7.3)(bufferutil@4.0.9)(zod@4.4.3)
-      '@earendil-works/pi-durable':
-        specifier: 1.5.2
-        version: 1.5.2(@aws-sdk/credential-provider-node@3.972.83)(@smithy/signature-v4@5.7.3)(bufferutil@4.0.9)(esbuild@0.28.2)(react@19.2.7)(undici@8.12.3)(zod@4.4.3)
       '@earendil-works/pi-mcp':
         specifier: 1.5.2
         version: 1.5.2
@@ -580,21 +574,6 @@ packages:
   '@drizzle-team/brocli@0.10.2':
     resolution: {integrity: sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w==}
 
-  '@earendil-works/chord@1.5.2':
-    resolution: {integrity: sha512-3g088g7qVXL2cpRAKWjj9za6RLls9FBnuUo5c0hBZ0xCftBQjae0opS+34M22vdXTVE7BNqkRG/FPc9BsM7eEg==}
-    engines: {node: '>=22.19.0'}
-    peerDependencies:
-      esbuild: 0.28.2
-      react: 19.3.0
-      ws: 8.21.0
-    peerDependenciesMeta:
-      esbuild:
-        optional: true
-      react:
-        optional: true
-      ws:
-        optional: true
-
   '@earendil-works/pi-agent-core@1.5.2':
     resolution: {integrity: sha512-ie5mejS7mGfXt//9As7i3LfxVXdktZvF1JP4EQsUXTp4mU437h23MNGx7wXZ5VYs3YiG/Qnj3e7OZ2HC069OMw==}
     engines: {node: '>=22.19.0'}
@@ -612,10 +591,6 @@ packages:
     resolution: {integrity: sha512-mUWI04rqF1Vd/m1q+Ps1XeWsTXEVvRUnsmRa83I3Dzua0Tx5bYS93imeqtIfrXf7PkkaR6ERz+AuQhIJlom5yA==}
     engines: {node: '>=22.19.0'}
     hasBin: true
-
-  '@earendil-works/pi-durable@1.5.2':
-    resolution: {integrity: sha512-zDB3anbI/yD0IG+VVY+g5tU+c5XOVqQAFwLkXRMiqZb4p/afWro0voZtLNoRAWcDA2r73kvmH6kKin9Ka8l55g==}
-    engines: {node: '>=22.19.0'}
 
   '@earendil-works/pi-mcp@1.5.2':
     resolution: {integrity: sha512-zU1UgeXDlbixPqGEWD7Ql0brEMIpYr7aEWjoEE5h5enJbM/kQ2jIr7lN8JoR80oUnq1fJSU7SC8kLx2Fx/IZYg==}
@@ -2584,9 +2559,6 @@ packages:
 
   '@silvia-odwyer/photon-node@0.3.4':
     resolution: {integrity: sha512-bnly4BKB3KDTFxrUIcgCLbaeVVS8lrAkri1pEzskpmxu9MdfGQTy8b8EgcD83ywD3RPMsIulY8xJH5Awa+t9fA==}
-
-  '@silvia-odwyer/photon@0.3.3':
-    resolution: {integrity: sha512-8BhUjEch4slwRe8uXnaA4vcA5uiiOTT90UMsxulOj2gN98X1p0q9Z4Ysk4DkD05uNgbR9XoSqtZ37w+33w4QKQ==}
 
   '@smithy/core@3.34.1':
     resolution: {integrity: sha512-dLcOUxz8YCv1RZUMKq6GbyUf95pLbrqh34bPvpCZ1+CByFF31BEAFewZjsGCnVsZTKdThNENfGyAgk2TJqVwSw==}
@@ -6001,14 +5973,6 @@ snapshots:
 
   '@drizzle-team/brocli@0.10.2': {}
 
-  '@earendil-works/chord@1.5.2(esbuild@0.28.2)(react@19.2.7)':
-    dependencies:
-      '@earendil-works/pi-schema': 1.5.2
-      '@earendil-works/pi-telemetry': 1.5.2
-    optionalDependencies:
-      esbuild: 0.28.2
-      react: 19.2.7
-
   '@earendil-works/pi-agent-core@1.5.2(@aws-sdk/credential-provider-node@3.972.83)(@smithy/signature-v4@5.7.3)(bufferutil@4.0.9)(undici@8.12.3)(zod@4.4.3)':
     dependencies:
       '@earendil-works/pi-ai': 1.5.2(@aws-sdk/credential-provider-node@3.972.83)(@smithy/signature-v4@5.7.3)(bufferutil@4.0.9)(undici@8.12.3)(zod@4.4.3)
@@ -6087,30 +6051,6 @@ snapshots:
       - bufferutil
       - kerberos
       - supports-color
-      - utf-8-validate
-      - ws
-      - zod
-
-  '@earendil-works/pi-durable@1.5.2(@aws-sdk/credential-provider-node@3.972.83)(@smithy/signature-v4@5.7.3)(bufferutil@4.0.9)(esbuild@0.28.2)(react@19.2.7)(undici@8.12.3)(zod@4.4.3)':
-    dependencies:
-      '@earendil-works/chord': 1.5.2(esbuild@0.28.2)(react@19.2.7)
-      '@earendil-works/pi-ai': 1.5.2(@aws-sdk/credential-provider-node@3.972.83)(@smithy/signature-v4@5.7.3)(bufferutil@4.0.9)(undici@8.12.3)(zod@4.4.3)
-      '@earendil-works/pi-codemode': 1.5.2
-      '@earendil-works/pi-schema': 1.5.2
-      '@earendil-works/pi-telemetry': 1.5.2
-      '@silvia-odwyer/photon': 0.3.3
-      diff: 8.0.4
-    transitivePeerDependencies:
-      - '@aws-sdk/credential-provider-node'
-      - '@modelcontextprotocol/sdk'
-      - '@smithy/hash-node'
-      - '@smithy/signature-v4'
-      - bufferutil
-      - esbuild
-      - kerberos
-      - react
-      - supports-color
-      - undici
       - utf-8-validate
       - ws
       - zod
@@ -7761,8 +7701,6 @@ snapshots:
   '@shikijs/vscode-textmate@10.0.2': {}
 
   '@silvia-odwyer/photon-node@0.3.4': {}
-
-  '@silvia-odwyer/photon@0.3.3': {}
 
   '@smithy/core@3.34.1':
     dependencies:

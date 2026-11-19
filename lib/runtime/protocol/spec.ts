@@ -8,13 +8,6 @@ import type { Skill } from "@earendil-works/pi-coding-agent";
  * 运行宿主内部继续保留这些类型；跨进程/持久化边界使用独立的 RunDescriptor，
  * 不向本类型继续添加附件字节或跨进程工具闭包（企业 MVP 方案 §2.1）。
  */
-export type DurableChatAttachment = {
-  libraryItemId: string;
-  path: string;
-  sha256: string;
-  size: number;
-};
-
 export type ProjectSourceReference = {
   sourceId: string;
   sha256: string;
@@ -30,8 +23,6 @@ export type ProjectSourcesGrant = {
 
 export type RuntimeSpec = {
   projectSources?: ProjectSourcesGrant;
-  /** Explicit request lane. Selection is not authorization. */
-  lane?: "default" | "durable_sandbox";
   /** Sandbox Host Tools Bridge context. The route supplies only the
    * message-level idempotency key; RunManager binds the authenticated
    * RunStartInput.userId (single source of truth) before backend.open, and
@@ -41,13 +32,6 @@ export type RuntimeSpec = {
   hostTools?: {
     idempotencyKey: string;
     userId?: string;
-  };
-  /** Server-assembled, reference-only grant; never accepted from request JSON. */
-  durableChat?: {
-    userId: string;
-    catalogModelId: string;
-    promptHash: string;
-    attachments: DurableChatAttachment[];
   };
   /** Assigned by RunManager; shared with sandbox registry and inference audit. */
   runId?: string;

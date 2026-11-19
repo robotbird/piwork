@@ -61,10 +61,7 @@ export async function POST(
         { status: 400 }
       );
     }
-    // Editable notes are snapshotted so this turn refers to stable bytes,
-    // including in Durable's existing owned LibraryItem/hash pipeline.
-    // 新写入私有化（A5/S5）：快照不再向 public Blob 写入；上限沿用聊天
-    // 附件限额（上方已拒绝超限字节）
+    // Snapshot editable notes as private attachments so this turn reads stable bytes.
     const file = await createPrivateFileStore(undefined, {
       maxBytes: MAX_CHAT_ATTACHMENT_SIZE,
     })({

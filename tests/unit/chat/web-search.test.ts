@@ -3,7 +3,6 @@ import test from "node:test";
 import { runtimeEventToUIMessageChunks } from "../../../app/(chat)/api/chat/stream-mapping";
 import { heuristicExecution } from "../../../lib/ai/execution-heuristic";
 import { PiEventNormalizer } from "../../../lib/runtime/backends/pi-event-normalizer";
-import { selectChatRuntime } from "../../../lib/runtime/backends/routing/chat-routing";
 import { isPersistedRuntimeEvent } from "../../../lib/runtime/run/event-store";
 import { buildAssistantMessageParts } from "../../../lib/runtime/run/message-builder";
 import { WEB_SEARCH_TOOL } from "../../../lib/search/protocol";
@@ -19,17 +18,6 @@ test("opted-in pure public search is lightweight; disabled and mixed execution s
     const input = { attachmentCount: 0, history: [], message };
     const decision = heuristicExecution({ ...input, platformWebSearch: true });
     assert.equal(decision.requiresExecution, false, message);
-    assert.equal(
-      selectChatRuntime({
-        approvalContinuation: false,
-        classificationReason: decision.reason,
-        durableEnabled: true,
-        needsCompatibility: true,
-        requiresExecution: decision.requiresExecution,
-        skillCommand: false,
-      }).lane,
-      "default"
-    );
   }
   for (const message of [
     "联网搜索后执行 Python 脚本",

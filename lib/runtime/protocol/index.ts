@@ -26,7 +26,6 @@ export {
   serializeRunDescriptor,
 } from "./run-descriptor";
 export type {
-  DurableChatAttachment,
   ProjectSourceReference,
   ProjectSourcesGrant,
   RuntimeSpec,

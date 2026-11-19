@@ -164,7 +164,6 @@ graph LR
 - [ ] CONTRIBUTING.md 与 SECURITY.md
 - [ ] 更多界面语言
 - [ ] OpenSandbox 生产级 provider 加固
-- [ ] Durable 执行试点（当前为实验特性）
 
 <p align="right">(<a href="#readme-top">回到顶部 ⬆️</a>)</p>
 

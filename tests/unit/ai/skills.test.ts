@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -13,10 +20,14 @@ import {
   fetchSkillInstallArchive,
   installProjectSkill,
   invokeSkill,
+  listProjectSkillFiles,
   loadProjectSkillSummaries,
   loadProjectSkills,
+  MAX_SKILL_PREVIEW_FILE_SIZE,
   normalizeSkillInstallArchive,
   parseSkillCommand,
+  readProjectSkillFile,
+  setProjectSkillEnabled,
   validateSkillName,
 } from "../../../lib/ai/skills.ts";
 import { withDeclaredSkillZipSizes } from "../../support/skill-zip";
@@ -49,6 +60,13 @@ test("creates and discovers a standard Pi skill", async () => {
 
     const summaries = await loadProjectSkillSummaries(cwd);
     assert.equal(summaries.skills[0]?.displayName, "Weekly Recap");
+
+    await setProjectSkillEnabled("weekly-recap", false, cwd);
+    assert.equal((await loadProjectSkills(cwd)).skills.length, 0);
+    assert.equal(
+      (await loadProjectSkillSummaries(cwd)).skills[0]?.enabled,
+      false
+    );
   } finally {
     await rm(cwd, { force: true, recursive: true });
   }
@@ -163,6 +181,60 @@ test("rejects uploads with unsafe paths", async () => {
       ],
     })
   );
+});
+
+test("browses regular skill files and refuses symlink previews and oversize files", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "piwork-skill-browse-"));
+  const name = "browse-skill";
+  try {
+    await installProjectSkill({
+      cwd,
+      files: [
+        {
+          content: Buffer.from(
+            `---\nname: ${name}\ndescription: Browses test files.\n---\n`
+          ),
+          path: `${name}/SKILL.md`,
+        },
+        { content: Buffer.from("Guide"), path: `${name}/references/guide.md` },
+      ],
+    });
+    const directory = join(cwd, ".pi", "skills", name);
+    await symlink(
+      join(directory, "references", "guide.md"),
+      join(directory, "file-link"),
+      "file"
+    );
+    await symlink(
+      join(directory, "references"),
+      join(directory, "directory-link"),
+      "dir"
+    );
+    await writeFile(
+      join(directory, "large.bin"),
+      Buffer.alloc(MAX_SKILL_PREVIEW_FILE_SIZE + 1)
+    );
+
+    const listing = await listProjectSkillFiles(name, cwd);
+    assert.deepEqual(
+      listing.entries.map((entry) => entry.path),
+      ["large.bin", "references", "references/guide.md", "SKILL.md"]
+    );
+    assert.equal(
+      (await readProjectSkillFile(name, "references/guide.md", cwd)).content,
+      "Guide"
+    );
+    await assert.rejects(
+      readProjectSkillFile(name, "file-link", cwd),
+      /is not a file/
+    );
+    await assert.rejects(
+      readProjectSkillFile(name, "large.bin", cwd),
+      /preview limit/
+    );
+  } finally {
+    await rm(cwd, { force: true, recursive: true });
+  }
 });
 
 test("extracts a skill ZIP with a top-level directory", () => {

@@ -116,7 +116,7 @@ export const runDescriptorSchema = z
   .strictObject({
     attachments: z.array(attachment).max(100),
     attempt: positiveInteger,
-    backend: z.enum(["in_process", "sandbox_rpc", "sandbox_tools", "durable"]),
+    backend: z.enum(["in_process", "sandbox_rpc", "sandbox_tools"]),
     budget: z.strictObject({
       maxCostMicros: nonnegativeInteger,
       maxModelRetries: z.number().int().min(0).max(10),
@@ -156,16 +156,10 @@ export const runDescriptorSchema = z
       );
     }
     if (
-      ["sandbox_tools", "durable"].includes(descriptor.backend) &&
+      descriptor.backend === "sandbox_tools" &&
       descriptor.workspace === null
     ) {
       issue(["workspace"], "This backend requires a sandbox workspace");
-    }
-    if (descriptor.backend === "durable" && descriptor.lane === "interactive") {
-      issue(
-        ["lane"],
-        "Durable is restricted to explicitly selected background tasks"
-      );
     }
     if (descriptor.budget.maxToolSeconds > descriptor.budget.maxRunSeconds) {
       issue(

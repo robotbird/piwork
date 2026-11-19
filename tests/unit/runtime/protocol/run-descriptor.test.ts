@@ -100,20 +100,9 @@ test("descriptor: reject credentials, SDK objects, callbacks and raw bytes at ev
   });
 });
 
-test("descriptor: enforce backend/lane/workspace consistency while preserving RPC all mode", () => {
+test("descriptor: enforce backend workspace requirements while preserving RPC all mode", () => {
   rejected({ ...makeWorkspaceDescriptor(), backend: "in_process" });
   rejected({ ...makeRunDescriptor(), backend: "sandbox_tools" });
-  rejected({ ...makeWorkspaceDescriptor(), backend: "durable" });
-  for (const lane of ["background", "scheduled"] as const) {
-    assert.equal(
-      runDescriptorSchema.parse({
-        ...makeWorkspaceDescriptor(),
-        backend: "durable",
-        lane,
-      }).lane,
-      lane
-    );
-  }
   // Existing all routing can send a pure conversation to RPC with no workspace.
   assert.equal(
     runDescriptorSchema.parse({

@@ -43,8 +43,6 @@ import {
   releaseDesktopSyncLease,
 } from "@/lib/db/desktop-sync-queries";
 import { canReadStoredFile } from "@/lib/db/library-queries";
-import { listMcpServers } from "@/lib/db/mcp-server-queries";
-import { listPiPackages } from "@/lib/db/pi-package-queries";
 import { getProject } from "@/lib/db/project-queries";
 import {
   deleteChatById,
@@ -62,24 +60,13 @@ import { syncManagedAgentMcpConfig } from "@/lib/mcp/agent-config";
 import { pluginSearchAvailable } from "@/lib/pi-packages/runtime-flag";
 import { buildProjectSourcesContext } from "@/lib/projects/context";
 import { projectDocumentInputsEnabled } from "@/lib/projects/document-inputs";
-import { durableChatExecutionPrompt } from "@/lib/runtime/backends/durable/chat-attachments";
-import { hashDurablePrompt } from "@/lib/runtime/backends/durable/chat-input";
-import { readDurableChatConfig } from "@/lib/runtime/backends/durable/chat-policy";
 import { willRunSandbox } from "@/lib/runtime/backends/routing/backend";
-import {
-  chatNeedsCompatibility,
-  projectChatExecution,
-  selectChatRuntime,
-} from "@/lib/runtime/backends/routing/chat-routing";
+import { projectChatExecution } from "@/lib/runtime/backends/routing/chat-routing";
 import type {
   ProjectSourcesGrant,
   RuntimeCommand,
 } from "@/lib/runtime/protocol";
 import { getRunManager } from "@/lib/runtime/run";
-import {
-  assertDurableChatAdmission,
-  prepareDurableChatTurn,
-} from "@/lib/runtime/run/durable-chat";
 import type { RunSubscription } from "@/lib/runtime/run/run-manager";
 import { scheduledTaskTools } from "@/lib/scheduler/service";
 import { chatWebSearchTools } from "@/lib/search/chat";
@@ -202,9 +189,6 @@ export async function POST(request: Request) {
     const chat = await getChatById({ id });
     let messagesFromDb: DBMessage[] = [];
     let titlePromise: Promise<string> | null = null;
-    // 协作成员（非所有者）可续发消息，但：不触发 durable 自动分流；标题生成
-    // 仍属所有者首条消息场景；重写历史类操作在别处保持所有者限定。
-    let isChatOwner = true;
 
     if (chat) {
       const access = await getChatAccess(id, session.user.id);
@@ -217,7 +201,6 @@ export async function POST(request: Request) {
       ) {
         return new ChatbotError("forbidden:chat").toResponse();
       }
-      isChatOwner = access.isOwner;
       if (process.env.PIWORK_DESKTOP_SYNC_ENABLED === "1") {
         try {
           const token = await acquireWebLeaseIfSynced(id, chat.userId);
@@ -358,13 +341,8 @@ export async function POST(request: Request) {
     }
     const skillCommand = parseSkillCommand(currentUserText);
     const history = uiMessages.slice(0, currentUserMessageIndex);
-    // Decide before parsing attachments or creating a host workspace. Metadata
-    // discovery is not execution; only names, never integration credentials, are used.
-    const discovered = await loadEnabledManagedProjectSkills();
-    const durableConfig = readDurableChatConfig();
-    const [mcpServers, packages] = durableConfig
-      ? await Promise.all([listMcpServers(), listPiPackages()])
-      : [[], []];
+    const { skills, diagnostics: skillDiagnostics } =
+      await loadEnabledManagedProjectSkills();
     const platformWebSearch = webSearchEnabled();
     // 分类器的能力信号 = Tavily 平台工具或插件路线(pi-web-access 等),
     // 任一可用即纯搜索问题可留在轻量通道;平台工具装配仍只看 Tavily 开关
@@ -386,61 +364,12 @@ export async function POST(request: Request) {
               signal: request.signal,
             })
         : { reason: "disabled", requiresExecution: false });
-    const routing = selectChatRuntime({
-      approvalContinuation: isToolApprovalFlow,
-      classificationReason: classification.reason,
-      // 协作成员的消息固定走既有经典矩阵：durable lane 的正式 DB 授权按
-      // Chat.userId 复核，非所有者会在水合/执行前被拒绝；这里提前排除，
-      // 避免「选定后失败」。分类不等于授权。
-      durableEnabled: durableConfig !== null && isChatOwner,
-      needsCompatibility: chatNeedsCompatibility({
-        capabilityNames: [
-          ...discovered.skills.map((skill) => skill.name),
-          ...mcpServers
-            .filter((server) => server.enabled)
-            .map((server) => server.name),
-          ...packages
-            .filter((item) => item.resourceSummary.extensions > 0)
-            .map((item) => item.name),
-        ],
-        history,
-        message: currentUserText,
-      }),
-      projectChat: Boolean(chat?.projectId),
-      requiresExecution: classification.requiresExecution,
-      skillCommand: Boolean(skillCommand),
-    });
-    const isDurable = routing.lane === "durable_sandbox";
-    if (isDurable) {
-      // Authorization failure after selection is fatal, not a reroute to host tools.
-      await assertDurableChatAdmission(session.user.id);
-    }
     console.info("[chat] execution routing", {
       chatId: id,
       ...classification,
-      ...routing,
     });
 
-    let durableTurn:
-      | Awaited<ReturnType<typeof prepareDurableChatTurn>>
-      | undefined;
     if (message?.role === "user") {
-      if (isDurable) {
-        try {
-          durableTurn = await prepareDurableChatTurn(
-            session.user.id,
-            message,
-            request.signal
-          );
-        } catch (error) {
-          if (error instanceof ChatbotError) {
-            throw error;
-          }
-          return new Response(t("durableAttachmentUnavailable"), {
-            status: 400,
-          });
-        }
-      }
       const fileAccess = await Promise.all(
         message.parts
           .filter((part) => part.type === "file" && isChatFileUrl(part.url))
@@ -479,11 +408,9 @@ export async function POST(request: Request) {
 
     let preparedAttachments: PreparedChatAttachments;
     try {
-      preparedAttachments = isDurable
-        ? { images: durableTurn?.images ?? [], text: "" }
-        : currentUserMessage
-          ? await prepareChatAttachments(currentUserMessage, request.signal)
-          : { images: [], text: "" };
+      preparedAttachments = currentUserMessage
+        ? await prepareChatAttachments(currentUserMessage, request.signal)
+        : { images: [], text: "" };
     } catch (error) {
       return Response.json(
         {
@@ -503,32 +430,24 @@ export async function POST(request: Request) {
       return Response.json({ error: t("modelNoImages") }, { status: 400 });
     }
 
-    // No platform closures silently cross the Durable seam.
-    const { skills, diagnostics: skillDiagnostics } = isDurable
-      ? { diagnostics: [], skills: [] }
-      : discovered;
     if (skillDiagnostics.length > 0) {
       console.warn("Skill discovery warnings:", skillDiagnostics);
     }
 
     // 执行类工具（bash/read/write/edit + deliver_file）以每聊天独立工作区
     // 运行；用户上传的附件原始字节先落盘到工作区供 skill 脚本直接读取。
-    const workspaceDir = isDurable
-      ? "ephemeral"
-      : classification.requiresExecution
-        ? await ensureChatWorkspace(id)
-        : null;
-    // 管理端 MCP 服务配置同步进受管 agentDir 的 mcp.json（Pi 内置 MCP
-    // 扩展的全局发现位置，pi.dev/docs/latest/mcp）；幂等（内容未变不写盘），
-    // 失败仅记日志不阻断聊天。无工作区会话本来就禁用受管扩展/MCP，
-    // 不必写共享配置；自动选定的 Durable 路径也不装配 MCP。
-    if (!isDurable && workspaceDir) {
+    const workspaceDir = classification.requiresExecution
+      ? await ensureChatWorkspace(id)
+      : null;
+    // Workspace runs sync the managed mcp.json before the Pi session opens.
+    // A sync failure is logged and the run can still start.
+    if (workspaceDir) {
       await syncManagedAgentMcpConfig().catch((error) => {
         console.warn("Failed to sync managed agent mcp.json:", error);
       });
     }
     let workspaceAttachmentFiles: string[] = [];
-    if (!isDurable && workspaceDir && currentUserMessage) {
+    if (workspaceDir && currentUserMessage) {
       try {
         workspaceAttachmentFiles = await writeAttachmentsToWorkspace(
           currentUserMessage,
@@ -554,23 +473,17 @@ export async function POST(request: Request) {
       requestHints,
       supportsTools: false,
     });
-    const executionPrompt = isDurable
-      ? durableChatExecutionPrompt(durableTurn?.attachments ?? [])
-      : workspaceDir
-        ? buildExecutionSystemPrompt(workspaceDir, workspaceAttachmentFiles)
-        : "";
+    const executionPrompt = workspaceDir
+      ? buildExecutionSystemPrompt(workspaceDir, workspaceAttachmentFiles)
+      : "";
     // 沙箱宿主工具桥（二期）：实际会进沙箱的 run 且插件可用时，装配
     // platform_web_search 桥接工具与提示词（轻量通道的 Tavily 闭包已含
     // 同名工具时跳过，避免重名）。
     const webAccessBridge =
-      !isDurable &&
-      willRunSandbox({ lane: routing.lane, workspaceDir }) &&
+      willRunSandbox({ workspaceDir }) &&
       !(platformWebSearch && !workspaceDir) &&
       (await getWebAccessService().available());
-    const historyMessages = toPiHistoryMessages(
-      uiMessages.slice(0, currentUserMessageIndex),
-      chatModel
-    );
+    const historyMessages = toPiHistoryMessages(history, chatModel);
 
     const sandboxSkillCommand = Boolean(
       process.env.PIWORK_SANDBOX_PROVIDER && workspaceDir && skillCommand
@@ -734,68 +647,47 @@ export async function POST(request: Request) {
               prompt: runtimePrompt,
               spec: {
                 ...(projectSources ? { projectSources } : {}),
-                lane: routing.lane,
-                // 沙箱宿主工具桥：只传消息级幂等盐（发起人 userId 由
-                // RunManager 以 RunStartInput.userId 绑定，单一事实源）
-                ...(isDurable
-                  ? {}
-                  : { hostTools: { idempotencyKey: currentUserMessage.id } }),
-                ...(isDurable
-                  ? {
-                      durableChat: {
-                        attachments: durableTurn?.attachments ?? [],
-                        catalogModelId: chatModel,
-                        promptHash: hashDurablePrompt(runtimePrompt),
-                        userId: session.user.id,
-                      },
-                    }
-                  : {}),
-                appendSystemPrompt: isDurable
-                  ? [executionPrompt]
-                  : [
-                      buildSkillsSystemPrompt(skills),
-                      schedulingPrompt + new Date().toISOString(),
-                      ...(platformWebSearch && !workspaceDir
-                        ? [webSearchPrompt + new Date().toISOString()]
-                        : []),
-                      ...(webAccessBridge
-                        ? [webAccessPrompt + new Date().toISOString()]
-                        : []),
-                      ...(executionPrompt ? [executionPrompt] : []),
-                    ],
+                appendSystemPrompt: [
+                  buildSkillsSystemPrompt(skills),
+                  schedulingPrompt + new Date().toISOString(),
+                  ...(platformWebSearch && !workspaceDir
+                    ? [webSearchPrompt + new Date().toISOString()]
+                    : []),
+                  ...(webAccessBridge
+                    ? [webAccessPrompt + new Date().toISOString()]
+                    : []),
+                  ...(executionPrompt ? [executionPrompt] : []),
+                ],
                 chatId: id,
                 historyMessages,
+                // RunManager binds the authenticated actor to this message-level key.
+                hostTools: { idempotencyKey: currentUserMessage.id },
                 model: piModel,
-                skills: isDurable ? [] : skills,
+                skills,
                 systemPrompt: baseSystemPrompt,
-                tools: isDurable
-                  ? []
-                  : [
-                      ...createSkillTools(skills),
-                      ...(platformWebSearch && !workspaceDir
-                        ? chatWebSearchTools({
-                            chatId: id,
-                            model: piModel,
-                            userId: session.user.id,
-                          })
-                        : []),
-                      ...(webAccessBridge
-                        ? [
-                            createWebSearchBridgeTool({
-                              chatId: id,
-                              model: {
-                                id: piModel.id,
-                                provider: piModel.provider,
-                              },
-                              userId: session.user.id,
-                            }),
-                          ]
-                        : []),
-                      ...scheduledTaskTools(
-                        session.user.id,
-                        currentUserMessage.id
-                      ),
-                    ],
+                tools: [
+                  ...createSkillTools(skills),
+                  ...(platformWebSearch && !workspaceDir
+                    ? chatWebSearchTools({
+                        chatId: id,
+                        model: piModel,
+                        userId: session.user.id,
+                      })
+                    : []),
+                  ...(webAccessBridge
+                    ? [
+                        createWebSearchBridgeTool({
+                          chatId: id,
+                          model: {
+                            id: piModel.id,
+                            provider: piModel.provider,
+                          },
+                          userId: session.user.id,
+                        }),
+                      ]
+                    : []),
+                  ...scheduledTaskTools(session.user.id, currentUserMessage.id),
+                ],
                 workspaceDir,
               },
               userId: session.user.id,

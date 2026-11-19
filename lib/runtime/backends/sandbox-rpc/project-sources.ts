@@ -51,7 +51,7 @@ export async function installProjectDocuments(
   if (!spec.projectSources) {
     return "";
   }
-  if (!spec.workspaceDir || spec.lane === "durable_sandbox") {
+  if (!spec.workspaceDir) {
     throw new Error("runtime:project-documents:sandbox-rpc-required");
   }
   const { filesystem } = handle;

@@ -39,8 +39,7 @@ const toolApprovalMessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
 });
 
-// Backend selection and grants are server-owned. Unknown client fields (including
-// legacy runtimeLane) are stripped, never used to force or bypass automatic routing.
+// The server selects the backend and builds execution grants from authenticated state.
 export const postRequestBodySchema = z.object({
   id: z.uuid(),
   message: userMessageSchema.optional(),

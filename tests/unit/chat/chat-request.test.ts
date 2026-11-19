@@ -29,18 +29,17 @@ const request = {
   selectedChatModel: "test",
   selectedVisibilityType: "private",
 };
-test("clients cannot force a runtime lane or submit an identity/grant", () => {
-  for (const lane of ["default", "durable_sandbox", "evil"]) {
-    const parsed = postRequestBodySchema.parse({
-      ...request,
-      durableChat: { userId: crypto.randomUUID() },
-      runtimeLane: lane,
-      userId: crypto.randomUUID(),
-    });
-    assert.ok(!("runtimeLane" in parsed));
-    assert.ok(!("durableChat" in parsed));
-    assert.ok(!("userId" in parsed));
-  }
+test("chat requests strip client-supplied backend, project grant and identity", () => {
+  const parsed = postRequestBodySchema.parse({
+    ...request,
+    projectSources: { projectId: crypto.randomUUID() },
+    runtimeLane: "in_process",
+    userId: crypto.randomUUID(),
+  });
+  assert.deepEqual(parsed, request);
+});
+
+test("the request schema accepts an approval continuation without a new message", () => {
   assert.ok(
     postRequestBodySchema.safeParse({
       ...request,

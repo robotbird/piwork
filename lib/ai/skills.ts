@@ -1,8 +1,24 @@
 import { lookup } from "node:dns/promises";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { isIP } from "node:net";
-import { dirname, extname, isAbsolute, relative, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import {
+  dirname,
+  extname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "node:path";
 
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import {
   formatSkillsForPrompt,
@@ -10,7 +26,6 @@ import {
   type Skill,
   stripFrontmatter,
 } from "@earendil-works/pi-coding-agent";
-import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { obj, opt, str } from "@earendil-works/pi-schema";
 import { unzipSync } from "fflate";
 import { LocalizedError } from "@/lib/i18n/messages";
@@ -45,15 +60,11 @@ const RESERVED_SKILL_NAMES = new Set([
 ]);
 
 function getSkillsDirectory(cwd: string) {
-  return `${cwd}/.pi/skills`;
+  return resolve(cwd, ".pi", "skills");
 }
 
 function getSkillStatePath(cwd: string) {
-  return `${cwd}/.pi/skill-state.json`;
-}
-
-function createExecutionEnv(cwd: string) {
-  return new NodeExecutionEnv({ cwd });
+  return resolve(cwd, ".pi", "skill-state.json");
 }
 
 export type ProjectSkillUploadFile = {
@@ -688,17 +699,10 @@ export type ProjectSkillSummary = {
   version: string;
 };
 
-async function readDisabledSkillNames(env: NodeExecutionEnv, cwd: string) {
-  const stateFile = await env.readTextFile(
-    getSkillStatePath(cwd),
-    BACKGROUND_CONTEXT
-  );
-  if (!stateFile.ok) {
-    return new Set<string>();
-  }
-
+async function readDisabledSkillNames(cwd: string) {
   try {
-    const parsed = JSON.parse(stateFile.value) as { disabled?: unknown };
+    const stateFile = await readFile(getSkillStatePath(cwd), "utf8");
+    const parsed = JSON.parse(stateFile) as { disabled?: unknown };
     return new Set(
       Array.isArray(parsed.disabled)
         ? parsed.disabled.filter(
@@ -711,97 +715,52 @@ async function readDisabledSkillNames(env: NodeExecutionEnv, cwd: string) {
   }
 }
 
-async function writeDisabledSkillNames(
-  env: NodeExecutionEnv,
-  cwd: string,
-  disabled: Set<string>
-) {
-  await env.createDir(`${cwd}/.pi`, { recursive: true }, BACKGROUND_CONTEXT);
-  const written = await env.writeFile(
-    getSkillStatePath(cwd),
-    `${JSON.stringify({ disabled: [...disabled].sort() }, null, 2)}\n`,
-    BACKGROUND_CONTEXT
-  );
-  if (!written.ok) {
-    throw written.error;
-  }
-}
-
 export async function loadProjectSkills(cwd = process.cwd()) {
-  const env = createExecutionEnv(cwd);
-
-  try {
-    const loaded = loadSkillsFromDir({
-      dir: getSkillsDirectory(cwd),
-      source: "piwork",
-    });
-    const disabled = await readDisabledSkillNames(env, cwd);
-    return {
-      diagnostics: loaded.diagnostics,
-      skills: loaded.skills.filter((skill) => !disabled.has(skill.name)),
-    };
-  } finally {
-    await env.cleanup(BACKGROUND_CONTEXT);
-  }
+  const loaded = await loadAllProjectSkills(cwd);
+  const disabled = await readDisabledSkillNames(cwd);
+  return {
+    diagnostics: loaded.diagnostics,
+    skills: loaded.skills.filter((skill) => !disabled.has(skill.name)),
+  };
 }
 
+// biome-ignore lint/suspicious/useAwait: preserve the asynchronous loader contract
 export async function loadAllProjectSkills(cwd = process.cwd()) {
-  const env = createExecutionEnv(cwd);
-
-  try {
-    return loadSkillsFromDir({
-      dir: getSkillsDirectory(cwd),
-      source: "piwork",
-    });
-  } finally {
-    await env.cleanup(BACKGROUND_CONTEXT);
-  }
+  return loadSkillsFromDir({
+    dir: getSkillsDirectory(cwd),
+    source: "piwork",
+  });
 }
 
 export async function loadProjectSkillSummaries(cwd = process.cwd()) {
-  const env = createExecutionEnv(cwd);
+  const loaded = await loadAllProjectSkills(cwd);
+  const disabled = await readDisabledSkillNames(cwd);
+  const skills = await Promise.all(
+    loaded.skills.map(async (skill) => {
+      const metadataPath = skill.filePath.replace(
+        /SKILL\.md$/,
+        "agents/openai.yaml"
+      );
+      const [metadata, skillFile] = await Promise.all([
+        readFile(metadataPath, "utf8").catch(() => ""),
+        readFile(skill.filePath, "utf8").catch(() => ""),
+      ]);
+      const configuredName = parseSkillDisplayName(metadata)?.trim();
 
-  try {
-    const loaded = loadSkillsFromDir({
-      dir: getSkillsDirectory(cwd),
-      source: "piwork",
-    });
-    const disabled = await readDisabledSkillNames(env, cwd);
-    const skills = await Promise.all(
-      loaded.skills.map(async (skill) => {
-        const metadataPath = skill.filePath.replace(
-          /SKILL\.md$/,
-          "agents/openai.yaml"
-        );
-        const [metadata, skillFile] = await Promise.all([
-          env.readTextFile(metadataPath, BACKGROUND_CONTEXT),
-          env.readTextFile(skill.filePath, BACKGROUND_CONTEXT),
-        ]);
-        const configuredName = metadata.ok
-          ? parseSkillDisplayName(metadata.value)
-          : null;
+      return {
+        description: skill.description,
+        displayName: configuredName || formatSkillDisplayName(skill.name),
+        enabled: !disabled.has(skill.name),
+        name: skill.name,
+        source: getInstallableCatalogSkill(skill.name)
+          ? ("catalog" as const)
+          : ("upload" as const),
+        version: parseSkillVersion(skillFile) ?? "",
+      };
+    })
+  );
 
-        return {
-          description: skill.description,
-          displayName: configuredName?.trim()
-            ? configuredName.trim()
-            : formatSkillDisplayName(skill.name),
-          enabled: !disabled.has(skill.name),
-          name: skill.name,
-          source: getInstallableCatalogSkill(skill.name)
-            ? ("catalog" as const)
-            : ("upload" as const),
-          version: skillFile.ok
-            ? (parseSkillVersion(skillFile.value) ?? "")
-            : "",
-        };
-      })
-    );
-
-    return { diagnostics: loaded.diagnostics, skills };
-  } finally {
-    await env.cleanup(BACKGROUND_CONTEXT);
-  }
+  return { diagnostics: loaded.diagnostics, skills };
 }
 
 export async function setProjectSkillEnabled(
@@ -810,28 +769,23 @@ export async function setProjectSkillEnabled(
   cwd = process.cwd()
 ) {
   validateSkillName(name);
-  const env = createExecutionEnv(cwd);
-
-  try {
-    const loaded = loadSkillsFromDir({
-      dir: getSkillsDirectory(cwd),
-      source: "piwork",
-    });
-    const skill = loaded.skills.find((candidate) => candidate.name === name);
-    if (!skill) {
-      throw new Error(`Skill "${name}" was not found.`);
-    }
-
-    const disabled = await readDisabledSkillNames(env, cwd);
-    if (enabled) {
-      disabled.delete(name);
-    } else {
-      disabled.add(name);
-    }
-    await writeDisabledSkillNames(env, cwd, disabled);
-  } finally {
-    await env.cleanup(BACKGROUND_CONTEXT);
+  const { skills } = await loadAllProjectSkills(cwd);
+  if (!skills.some((skill) => skill.name === name)) {
+    throw new Error(`Skill "${name}" was not found.`);
   }
+
+  const disabled = await readDisabledSkillNames(cwd);
+  if (enabled) {
+    disabled.delete(name);
+  } else {
+    disabled.add(name);
+  }
+  const statePath = getSkillStatePath(cwd);
+  await mkdir(dirname(statePath), { recursive: true });
+  await writeFile(
+    statePath,
+    `${JSON.stringify({ disabled: [...disabled].sort() }, null, 2)}\n`
+  );
 }
 
 export async function createProjectSkill({
@@ -869,77 +823,62 @@ export async function createProjectSkill({
     );
   }
 
-  const env = createExecutionEnv(cwd);
-  const skillDirectory = `${getSkillsDirectory(cwd)}/${name}`;
-  const skillPath = `${skillDirectory}/SKILL.md`;
-
-  try {
-    const existing = await env.exists(skillPath, BACKGROUND_CONTEXT);
-    if (!existing.ok) {
-      throw existing.error;
+  const skillDirectory = join(getSkillsDirectory(cwd), name);
+  const skillPath = join(skillDirectory, "SKILL.md");
+  const existing = await lstat(skillPath).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
     }
-    if (existing.value) {
-      throw new Error(`Skill "${name}" already exists.`);
-    }
-
-    const created = await env.createDir(
-      skillDirectory,
-      { recursive: true },
-      BACKGROUND_CONTEXT
-    );
-    if (!created.ok) {
-      throw created.error;
-    }
-
-    const agentsDirectory = `${skillDirectory}/agents`;
-    const agentsCreated = await env.createDir(
-      agentsDirectory,
-      { recursive: true },
-      BACKGROUND_CONTEXT
-    );
-    if (!agentsCreated.ok) {
-      throw agentsCreated.error;
-    }
-
-    const metadata = [
-      "interface:",
-      `  display_name: ${JSON.stringify(cleanDisplayName)}`,
-      "",
-    ].join("\n");
-    const metadataWritten = await env.writeFile(
-      `${agentsDirectory}/openai.yaml`,
-      metadata,
-      BACKGROUND_CONTEXT
-    );
-    if (!metadataWritten.ok) {
-      throw metadataWritten.error;
-    }
-
-    const content = [
-      "---",
-      `name: ${JSON.stringify(name)}`,
-      `description: ${JSON.stringify(cleanDescription)}`,
-      "---",
-      "",
-      cleanInstructions,
-      "",
-    ].join("\n");
-    const written = await env.writeFile(skillPath, content, BACKGROUND_CONTEXT);
-    if (!written.ok) {
-      throw written.error;
-    }
-
-    const loaded = loadSkillsFromDir({ dir: skillDirectory, source: "piwork" });
-    const skill = loaded.skills.find((candidate) => candidate.name === name);
-    if (!skill) {
-      const detail = loaded.diagnostics.map((item) => item.message).join("; ");
-      throw new Error(detail || `Skill "${name}" failed validation.`);
-    }
-
-    return skill;
-  } finally {
-    await env.cleanup(BACKGROUND_CONTEXT);
+  );
+  if (existing) {
+    throw new Error(`Skill "${name}" already exists.`);
   }
+
+  const agentsDirectory = join(skillDirectory, "agents");
+  await mkdir(agentsDirectory, { recursive: true });
+  const metadata = [
+    "interface:",
+    `  display_name: ${JSON.stringify(cleanDisplayName)}`,
+    "",
+  ].join("\n");
+  await writeFile(join(agentsDirectory, "openai.yaml"), metadata);
+
+  const content = [
+    "---",
+    `name: ${JSON.stringify(name)}`,
+    `description: ${JSON.stringify(cleanDescription)}`,
+    "---",
+    "",
+    cleanInstructions,
+    "",
+  ].join("\n");
+  await writeFile(skillPath, content);
+
+  const loaded = loadSkillsFromDir({ dir: skillDirectory, source: "piwork" });
+  const skill = loaded.skills.find((candidate) => candidate.name === name);
+  if (!skill) {
+    const detail = loaded.diagnostics.map((item) => item.message).join("; ");
+    throw new Error(detail || `Skill "${name}" failed validation.`);
+  }
+
+  return skill;
+}
+
+function writeUploadedSkillFiles(
+  directory: string,
+  files: ProjectSkillUploadFile[]
+) {
+  return forEachSkillFile(
+    files,
+    SKILL_LIMITS.hostWriteConcurrency,
+    async (file) => {
+      const destination = join(directory, file.path);
+      await mkdir(dirname(destination), { recursive: true });
+      await writeFile(destination, file.content);
+    }
+  );
 }
 
 export async function installProjectSkill({
@@ -1022,34 +961,14 @@ export async function installProjectSkill({
     throw new Error("The upload contains duplicate file paths.");
   }
 
-  const env = createExecutionEnv(cwd);
-  const tempResult = await env.createTempDir(
-    "piwork-skill-upload-",
-    BACKGROUND_CONTEXT
+  const stagingDirectory = await mkdtemp(
+    join(tmpdir(), "piwork-skill-upload-")
   );
-  if (!tempResult.ok) {
-    await env.cleanup(BACKGROUND_CONTEXT);
-    throw tempResult.error;
-  }
-  const stagingDirectory = tempResult.value;
-  const stagedSkillDirectory = `${stagingDirectory}/${uploadedRoot}`;
+  const stagedSkillDirectory = join(stagingDirectory, uploadedRoot);
   let installedDirectory: string | null = null;
 
   try {
-    await forEachSkillFile(
-      relativeFiles,
-      SKILL_LIMITS.hostWriteConcurrency,
-      async (file) => {
-        const written = await env.writeFile(
-          `${stagedSkillDirectory}/${file.path}`,
-          file.content,
-          BACKGROUND_CONTEXT
-        );
-        if (!written.ok) {
-          throw written.error;
-        }
-      }
-    );
+    await writeUploadedSkillFiles(stagedSkillDirectory, relativeFiles);
 
     const staged = loadSkillsFromDir({
       dir: stagedSkillDirectory,
@@ -1069,49 +988,23 @@ export async function installProjectSkill({
 
     const [skill] = staged.skills;
     validateSkillName(skill.name);
-    const destinationDirectory = `${getSkillsDirectory(cwd)}/${skill.name}`;
+    const destinationDirectory = join(getSkillsDirectory(cwd), skill.name);
 
-    const existing = await env.exists(destinationDirectory, BACKGROUND_CONTEXT);
-    if (!existing.ok) {
-      throw existing.error;
-    }
-    if (existing.value) {
-      throw new Error(`Skill "${skill.name}" already exists.`);
-    }
-
-    const parentCreated = await env.createDir(
-      getSkillsDirectory(cwd),
-      { recursive: true },
-      BACKGROUND_CONTEXT
-    );
-    if (!parentCreated.ok) {
-      throw parentCreated.error;
-    }
+    await mkdir(dirname(destinationDirectory), { recursive: true });
     // Exclusive directory creation: never adopt or remove an existing install.
-    const created = await env.createDir(
-      destinationDirectory,
-      { recursive: false },
-      BACKGROUND_CONTEXT
-    );
-    if (!created.ok) {
-      throw created.error;
+    try {
+      await mkdir(destinationDirectory);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new Error(`Skill "${skill.name}" already exists.`, {
+          cause: error,
+        });
+      }
+      throw error;
     }
 
     installedDirectory = destinationDirectory;
-    await forEachSkillFile(
-      relativeFiles,
-      SKILL_LIMITS.hostWriteConcurrency,
-      async (file) => {
-        const written = await env.writeFile(
-          `${destinationDirectory}/${file.path}`,
-          file.content,
-          BACKGROUND_CONTEXT
-        );
-        if (!written.ok) {
-          throw written.error;
-        }
-      }
-    );
+    await writeUploadedSkillFiles(installedDirectory, relativeFiles);
 
     const installed = loadSkillsFromDir({
       dir: installedDirectory,
@@ -1135,20 +1028,15 @@ export async function installProjectSkill({
     return installedSkill;
   } catch (error) {
     if (installedDirectory) {
-      await env.remove(
-        installedDirectory,
-        { force: true, recursive: true },
-        BACKGROUND_CONTEXT
+      await rm(installedDirectory, { force: true, recursive: true }).catch(
+        () => undefined
       );
     }
     throw error;
   } finally {
-    await env.remove(
-      stagingDirectory,
-      { force: true, recursive: true },
-      BACKGROUND_CONTEXT
+    await rm(stagingDirectory, { force: true, recursive: true }).catch(
+      () => undefined
     );
-    await env.cleanup(BACKGROUND_CONTEXT);
   }
 }
 
@@ -1163,7 +1051,7 @@ function resolveProjectSkill(cwd: string, name: string) {
     throw new Error(`Skill "${name}" was not found.`);
   }
 
-  const skillsDirectory = resolve(getSkillsDirectory(cwd));
+  const skillsDirectory = getSkillsDirectory(cwd);
   const skillDirectory = resolve(dirname(skill.filePath));
   const relativeDirectory = relative(skillsDirectory, skillDirectory);
   if (
@@ -1178,25 +1066,12 @@ function resolveProjectSkill(cwd: string, name: string) {
 }
 
 export async function deleteProjectSkill(name: string, cwd = process.cwd()) {
-  const env = createExecutionEnv(cwd);
-
-  try {
-    const { relativeDirectory, skill, skillDirectory } = resolveProjectSkill(
-      cwd,
-      name
-    );
-    const target = relativeDirectory ? skillDirectory : skill.filePath;
-    const removed = await env.remove(
-      target,
-      { force: false, recursive: true },
-      BACKGROUND_CONTEXT
-    );
-    if (!removed.ok) {
-      throw removed.error;
-    }
-  } finally {
-    await env.cleanup(BACKGROUND_CONTEXT);
-  }
+  const { relativeDirectory, skill, skillDirectory } = resolveProjectSkill(
+    cwd,
+    name
+  );
+  const target = relativeDirectory ? skillDirectory : skill.filePath;
+  await rm(target, { recursive: true });
 }
 
 export type ProjectSkillFileEntry = {
@@ -1267,70 +1142,50 @@ export async function listProjectSkillFiles(
   name: string,
   cwd = process.cwd()
 ): Promise<{ entries: ProjectSkillFileEntry[]; truncated: boolean }> {
-  const env = createExecutionEnv(cwd);
+  const { relativeDirectory, skillDirectory } = resolveProjectSkill(cwd, name);
+  if (!relativeDirectory) {
+    throw new Error(`Skill "${name}" has no skill folder to browse.`);
+  }
 
-  try {
-    const { relativeDirectory, skillDirectory } = resolveProjectSkill(
-      cwd,
-      name
-    );
-    if (!relativeDirectory) {
-      throw new Error(`Skill "${name}" has no skill folder to browse.`);
+  const entries: ProjectSkillFileEntry[] = [];
+  let truncated = false;
+  const walk = async (directoryPath: string): Promise<void> => {
+    if (entries.length >= SKILL_LIMITS.browseEntries) {
+      truncated = true;
+      return;
     }
-
-    const entries: ProjectSkillFileEntry[] = [];
-    let truncated = false;
-    const walk = async (directoryPath: string): Promise<void> => {
+    const children = await readdir(join(skillDirectory, directoryPath));
+    children.sort((left, right) => left.localeCompare(right));
+    for (const child of children) {
+      const childPath = directoryPath ? `${directoryPath}/${child}` : child;
+      // biome-ignore lint/performance/noAwaitInLoops: preserve bounded, ordered traversal
+      const info = await lstat(join(skillDirectory, childPath));
+      const isDirectory = info.isDirectory();
+      if (!(isDirectory || info.isFile())) {
+        continue;
+      }
       if (entries.length >= SKILL_LIMITS.browseEntries) {
         truncated = true;
         return;
       }
-      const listed = await env.listDir(
-        directoryPath ? `${skillDirectory}/${directoryPath}` : skillDirectory,
-        BACKGROUND_CONTEXT
-      );
-      if (!listed.ok) {
-        throw listed.error;
+      entries.push({
+        kind: isDirectory ? "directory" : "file",
+        mtimeMs: info.mtimeMs,
+        name: child,
+        path: childPath,
+        size: info.size,
+      });
+      if (isDirectory) {
+        await walk(childPath);
       }
+    }
+  };
+  await walk("");
 
-      const children = [...listed.value].sort((left, right) =>
-        left.name.localeCompare(right.name)
-      );
-      for (const info of children) {
-        if (info.kind === "symlink") {
-          continue;
-        }
-        if (entries.length >= SKILL_LIMITS.browseEntries) {
-          truncated = true;
-          return;
-        }
-        const relativeInfoPath = directoryPath
-          ? `${directoryPath}/${info.name}`
-          : info.name;
-        entries.push({
-          kind: info.kind === "directory" ? "directory" : "file",
-          mtimeMs: info.mtimeMs,
-          name: info.name,
-          path: relativeInfoPath,
-          size: info.size,
-        });
-        if (info.kind === "directory") {
-          // biome-ignore lint/performance/noAwaitInLoops: 顺序遍历保证条目上限与稳定排序
-          await walk(relativeInfoPath);
-        }
-      }
-    };
-    await walk("");
-
-    return {
-      entries: entries.sort((left, right) =>
-        left.path.localeCompare(right.path)
-      ),
-      truncated,
-    };
-  } finally {
-    await env.cleanup(BACKGROUND_CONTEXT);
-  }
+  return {
+    entries: entries.sort((left, right) => left.path.localeCompare(right.path)),
+    truncated,
+  };
 }
 
 export async function readProjectSkillFile(
@@ -1338,75 +1193,48 @@ export async function readProjectSkillFile(
   requestedPath: string,
   cwd = process.cwd()
 ): Promise<ProjectSkillFileContent> {
-  const env = createExecutionEnv(cwd);
-
-  try {
-    const { relativeDirectory, skillDirectory } = resolveProjectSkill(
-      cwd,
-      name
-    );
-    if (!relativeDirectory) {
-      throw new Error(`Skill "${name}" has no skill folder to browse.`);
-    }
-
-    const { relativePath, target } = resolveSkillFilePath(
-      skillDirectory,
-      requestedPath
-    );
-    const info = await env.fileInfo(target, BACKGROUND_CONTEXT);
-    if (!info.ok) {
-      throw info.error;
-    }
-    if (info.value.kind !== "file") {
-      throw new Error(`"${relativePath}" is not a file.`);
-    }
-    if (info.value.size > MAX_SKILL_PREVIEW_FILE_SIZE) {
-      throw new Error(
-        `"${relativePath}" exceeds the ${MAX_SKILL_PREVIEW_FILE_SIZE / 1024} KB preview limit.`
-      );
-    }
-
-    const content = await env.readBinaryFile(target, BACKGROUND_CONTEXT);
-    if (!content.ok) {
-      throw content.error;
-    }
-
-    const imageMimeType =
-      IMAGE_MIME_TYPES[extname(relativePath).toLocaleLowerCase()];
-    if (imageMimeType) {
-      return {
-        content: Buffer.from(content.value).toString("base64"),
-        encoding: "base64",
-        mimeType: imageMimeType,
-        path: relativePath,
-        size: info.value.size,
-        truncated: false,
-      };
-    }
-
-    if (looksLikeBinary(content.value)) {
-      return {
-        content: Buffer.from(content.value).toString("base64"),
-        encoding: "base64",
-        mimeType: "application/octet-stream",
-        path: relativePath,
-        size: info.value.size,
-        truncated: false,
-      };
-    }
-
-    const text = new TextDecoder("utf-8").decode(content.value);
-    return {
-      content: text.slice(0, MAX_SKILL_PREVIEW_TEXT_LENGTH),
-      encoding: "text",
-      mimeType: "text/plain; charset=utf-8",
-      path: relativePath,
-      size: info.value.size,
-      truncated: text.length > MAX_SKILL_PREVIEW_TEXT_LENGTH,
-    };
-  } finally {
-    await env.cleanup(BACKGROUND_CONTEXT);
+  const { relativeDirectory, skillDirectory } = resolveProjectSkill(cwd, name);
+  if (!relativeDirectory) {
+    throw new Error(`Skill "${name}" has no skill folder to browse.`);
   }
+
+  const { relativePath, target } = resolveSkillFilePath(
+    skillDirectory,
+    requestedPath
+  );
+  const info = await lstat(target);
+  if (!info.isFile()) {
+    throw new Error(`"${relativePath}" is not a file.`);
+  }
+  if (info.size > MAX_SKILL_PREVIEW_FILE_SIZE) {
+    throw new Error(
+      `"${relativePath}" exceeds the ${MAX_SKILL_PREVIEW_FILE_SIZE / 1024} KB preview limit.`
+    );
+  }
+
+  const content = await readFile(target);
+  const imageMimeType =
+    IMAGE_MIME_TYPES[extname(relativePath).toLocaleLowerCase()];
+  if (imageMimeType || looksLikeBinary(content)) {
+    return {
+      content: content.toString("base64"),
+      encoding: "base64",
+      mimeType: imageMimeType || "application/octet-stream",
+      path: relativePath,
+      size: info.size,
+      truncated: false,
+    };
+  }
+
+  const text = new TextDecoder("utf-8").decode(content);
+  return {
+    content: text.slice(0, MAX_SKILL_PREVIEW_TEXT_LENGTH),
+    encoding: "text",
+    mimeType: "text/plain; charset=utf-8",
+    path: relativePath,
+    size: info.size,
+    truncated: text.length > MAX_SKILL_PREVIEW_TEXT_LENGTH,
+  };
 }
 
 export function buildSkillsSystemPrompt(skills: Skill[]) {
@@ -1444,21 +1272,13 @@ export function invokeSkill(
   return formatSkillInvocation(skill, additionalInstructions);
 }
 
-/**
- * 与 pi-coding-agent 1.0.0 的 _expandSkillCommand 同构
- * （dist/core/agent-session.js：读 SKILL.md → stripFrontmatter → <skill> 块）；
- * 1.0.0 起 formatSkillInvocation 不再从官方包导出。
- */
+/** Matches the `<skill>` block produced by Pi's AgentSession skill command. */
 async function formatSkillInvocation(
   skill: Skill,
   additionalInstructions?: string
 ) {
-  const env = new NodeExecutionEnv({ cwd: process.cwd() });
-  const read = await env.readTextFile(skill.filePath, BACKGROUND_CONTEXT);
-  if (!read.ok) {
-    throw read.error;
-  }
-  const body = stripFrontmatter(read.value).trim();
+  const content = await readFile(skill.filePath, "utf8");
+  const body = stripFrontmatter(content).trim();
   const skillBlock = `<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>`;
   return additionalInstructions
     ? `${skillBlock}\n\n${additionalInstructions}`

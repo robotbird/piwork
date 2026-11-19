@@ -91,7 +91,7 @@ test("actual actor/run/backend/chat/project and formal membership are required",
     await sql`UPDATE "AgentRun" SET status=${status} WHERE id=${runId}`;
     await assert.rejects(loadAuthorizedProjectDocuments(input));
   }
-  await sql`UPDATE "AgentRun" SET status='starting',backend='durable_sandbox' WHERE id=${runId}`;
+  await sql`UPDATE "AgentRun" SET status='starting',backend='in_process' WHERE id=${runId}`;
   await assert.rejects(loadAuthorizedProjectDocuments(input));
   await sql`UPDATE "AgentRun" SET backend='sandbox_rpc' WHERE id=${runId}`;
   await sql`UPDATE "Member" SET status='disabled' WHERE "userId"=${colleague}`;
