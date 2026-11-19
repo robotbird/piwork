@@ -1017,6 +1017,7 @@
     "askAnythingAction": "Ask anything...",
     "openSidebar": "Open sidebar",
     "logInToViewTaskHistory": "Log in to view task history",
+    "scheduledTaskTitle": "[Task] {name}",
     "logInToYourAccount": "Log in to your account",
     "waiting": "Waiting...",
     "conversationSettings": "Conversation settings",

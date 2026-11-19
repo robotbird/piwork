@@ -9,6 +9,7 @@ import { type ProjectSummary, request } from "@/components/projects/shared";
 import { Button } from "@/components/ui/button";
 import { useSidebar } from "@/components/ui/sidebar";
 import { useActiveChat } from "@/hooks/use-active-chat";
+import { formatChatTitle } from "@/lib/chat/title";
 import { ParticipantAvatars } from "./participant-avatars";
 import { ShareDialog } from "./share-dialog";
 import type { VisibilityType } from "./visibility-selector";
@@ -85,7 +86,7 @@ function PureChatHeader({
               </>
             ) : null}
             <span className="max-w-[min(42vw,460px)] truncate text-muted-foreground">
-              {title}
+              {formatChatTitle(title, t)}
             </span>
           </div>
           <div className="ml-auto flex items-center gap-1 text-muted-foreground">

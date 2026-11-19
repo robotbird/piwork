@@ -4,6 +4,7 @@ import Link from "next/link";
 import { memo, useCallback } from "react";
 import { usePreferences } from "@/components/preferences-provider";
 import { useChatVisibility } from "@/hooks/use-chat-visibility";
+import { formatChatTitle } from "@/lib/chat/title";
 import type { SharedChatListItem } from "@/lib/db/chat-share-queries";
 import {
   DropdownMenu,
@@ -74,7 +75,7 @@ const PureChatItem = ({
       >
         <Link href={`/chat/${chat.id}`} onClick={closeMobile}>
           <span className="flex min-w-0 items-center gap-1.5">
-            <span className="truncate">{chat.title}</span>
+            <span className="truncate">{formatChatTitle(chat.title, t)}</span>
             {isShared ? (
               <span
                 className="shrink-0 rounded border border-border-subtle bg-surface-subtle px-1 py-px text-[10px] leading-3.5 text-muted-foreground"

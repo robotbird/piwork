@@ -11,6 +11,7 @@ import { getPiModel } from "@/lib/ai/pi";
 import { regularPrompt } from "@/lib/ai/prompts";
 import { getUserModelCatalog } from "@/lib/ai/role-access";
 import { buildSkillsSystemPrompt, createSkillTools } from "@/lib/ai/skills";
+import { SCHEDULED_CHAT_TITLE_PREFIX } from "@/lib/chat/title";
 import {
   publishChatMessage,
   publishChatRun,
@@ -55,7 +56,7 @@ export async function executeScheduledTask(task: ScheduledTaskRecord) {
     const { skills } = await loadEnabledManagedProjectSkills();
     await saveChat({
       id: chatId,
-      title: `[任务] ${task.taskType}`,
+      title: `${SCHEDULED_CHAT_TITLE_PREFIX}${task.taskType}`,
       userId: task.userId,
       visibility: "private",
     });

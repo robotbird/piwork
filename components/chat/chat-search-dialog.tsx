@@ -20,6 +20,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { formatChatTitle } from "@/lib/chat/title";
 import type { ChatSearchResult } from "@/lib/db/chat-search-queries";
 import { fetcher } from "@/lib/utils";
 
@@ -35,6 +36,7 @@ export function ChatSearchDialog({
   signedIn: boolean;
 }) {
   const t = useTranslations("chatSearch");
+  const translate = useTranslations();
   const router = useRouter();
   const tc = useTranslations("common");
   const [query, setQuery] = useState("");
@@ -145,7 +147,9 @@ export function ChatSearchDialog({
                     >
                       <MessageCircleIcon />
                       <div className="min-w-0 flex-1">
-                        <p className="truncate">{chat.title}</p>
+                        <p className="truncate">
+                          {formatChatTitle(chat.title, translate)}
+                        </p>
                         {chat.snippet ? (
                           <p className="truncate text-xs text-muted-foreground">
                             {chat.snippet}

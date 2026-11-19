@@ -1017,6 +1017,7 @@
     "askAnythingAction": "处理任何事务...",
     "openSidebar": "打开侧边栏",
     "logInToViewTaskHistory": "登录后可查看任务记录",
+    "scheduledTaskTitle": "[任务] {name}",
     "logInToYourAccount": "登录账户",
     "waiting": "等待中…",
     "conversationSettings": "对话设置",

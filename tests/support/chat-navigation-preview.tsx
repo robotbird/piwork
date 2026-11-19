@@ -9,7 +9,8 @@ import { SidebarHistory } from "../../components/chat/sidebar-history";
 import { PreferencesProvider } from "../../components/preferences-provider";
 import { SidebarProvider } from "../../components/ui/sidebar";
 import { ActiveChatProvider, useActiveChat } from "../../hooks/use-active-chat";
-import messages from "../../i18n/messages/zh.json";
+import en from "../../i18n/messages/en.json";
+import zh from "../../i18n/messages/zh.json";
 import type { Attachment } from "../../lib/types";
 
 function Preview() {
@@ -60,22 +61,38 @@ function Preview() {
   );
 }
 
+function LocalePreview() {
+  const [locale, setLocale] = useState<"zh" | "en">("zh");
+  const selectEnglish = useCallback(() => setLocale("en"), []);
+  const selectChinese = useCallback(() => setLocale("zh"), []);
+  return (
+    <NextIntlClientProvider
+      locale={locale}
+      messages={locale === "en" ? en : zh}
+    >
+      <PreferencesProvider>
+        <button onClick={selectEnglish} type="button">
+          English
+        </button>
+        <button onClick={selectChinese} type="button">
+          中文
+        </button>
+        <SWRConfig value={{ dedupingInterval: 0, provider: () => new Map() }}>
+          <SidebarProvider>
+            <DataStreamProvider>
+              <ActiveChatProvider>
+                <Preview />
+              </ActiveChatProvider>
+            </DataStreamProvider>
+          </SidebarProvider>
+        </SWRConfig>
+      </PreferencesProvider>
+    </NextIntlClientProvider>
+  );
+}
+
 const root = document.getElementById("root");
 if (!root) {
   throw new Error("Preview root is missing");
 }
-createRoot(root).render(
-  <NextIntlClientProvider locale="zh" messages={messages}>
-    <PreferencesProvider>
-      <SWRConfig value={{ dedupingInterval: 0, provider: () => new Map() }}>
-        <SidebarProvider>
-          <DataStreamProvider>
-            <ActiveChatProvider>
-              <Preview />
-            </ActiveChatProvider>
-          </DataStreamProvider>
-        </SidebarProvider>
-      </SWRConfig>
-    </PreferencesProvider>
-  </NextIntlClientProvider>
-);
+createRoot(root).render(<LocalePreview />);

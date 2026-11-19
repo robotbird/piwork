@@ -136,6 +136,11 @@ try {
     myRole: "collaborator",
     title: "协作对话",
   });
+  stored.set("scheduled", {
+    messages: [],
+    myRole: "owner",
+    title: "[任务] 每日 AI News",
+  });
   let createdId = "";
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -219,6 +224,20 @@ try {
   );
   await page.goto(`http://127.0.0.1:${address.port}`);
   await page.getByRole("link", { name: "另一段历史" }).waitFor();
+  await expect(
+    page.getByRole("link", { exact: true, name: "[任务] 每日 AI News" })
+  ).toBeVisible();
+  await page.getByRole("button", { exact: true, name: "English" }).click();
+  await expect(
+    page.getByRole("link", { exact: true, name: "[Task] 每日 AI News" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { exact: true, name: "另一段历史" })
+  ).toBeVisible();
+  await page.getByRole("button", { exact: true, name: "中文" }).click();
+  await expect(
+    page.getByRole("link", { exact: true, name: "[任务] 每日 AI News" })
+  ).toBeVisible();
   await Promise.all(
     ["attachments-button", "model-selector", "send-button"].map((id) =>
       expect(page.getByTestId(id)).toHaveCSS("height", "30px")
