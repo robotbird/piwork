@@ -27,7 +27,7 @@ import {
   MessageReasoning,
   type ReasoningPartWithTiming,
 } from "./message-reasoning";
-import { collectSources, MessageSources } from "./message-sources";
+import { MessageSources } from "./message-sources";
 import { PreviewAttachment } from "./preview-attachment";
 import { TextAttachmentPreview } from "./text-attachment-preview";
 import { UserAvatar } from "./user-avatar";
@@ -424,12 +424,6 @@ const PurePreviewMessage = ({
     return null;
   });
 
-  // Web search sources (chip + expandable list); only assistant messages carry source parts
-  const sourcesPanel =
-    isAssistant && collectSources(message.parts).length > 0 ? (
-      <MessageSources key={`sources-${message.id}`} parts={message.parts} />
-    ) : null;
-
   const actions = !isReadonly && (
     <MessageActions
       chatId={chatId}
@@ -451,7 +445,7 @@ const PurePreviewMessage = ({
       {attachments}
       {reasoningPanel}
       {parts}
-      {sourcesPanel}
+      {isAssistant ? <MessageSources message={message} /> : null}
       {isAssistant && isLoading ? <ToolStatusText /> : null}
       {actions}
     </>

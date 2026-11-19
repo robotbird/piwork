@@ -1,14 +1,37 @@
 "use client";
 
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronRightIcon, XIcon } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useState } from "react";
+import {
+  createContext,
+  type MouseEvent,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { publicSourceUrl } from "@/lib/search/protocol";
 import type { ChatMessage } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /** Display cap mirroring the desktop sources panel. */
 const SOURCES_MAX = 50;
+const PANEL_ID = "chat-sources-panel";
+const PANEL_TITLE_ID = "chat-sources-title";
+
+export const MessageSourcesContext = createContext<{
+  activeMessageId: string | undefined;
+  toggleSources: (messageId: string, trigger: HTMLButtonElement) => void;
+} | null>(null);
 
 export type DisplaySource = {
   url: string;
@@ -86,7 +109,7 @@ function SourceFavicon({
       <span
         aria-hidden="true"
         className={cn(
-          "flex size-4 shrink-0 items-center justify-center rounded-[4px] text-[9px] font-semibold text-white",
+          "flex size-4 shrink-0 items-center justify-center rounded-full text-[9px] font-semibold text-white ring-1 ring-background",
           className
         )}
         style={{ backgroundColor: `hsl(${hueOf(host)} 45% 42%)` }}
@@ -102,7 +125,7 @@ function SourceFavicon({
     <img
       alt=""
       className={cn(
-        "size-4 shrink-0 rounded-[4px] object-cover",
+        "size-4 shrink-0 rounded-full object-cover",
         "ring-1 ring-background",
         className
       )}
@@ -113,88 +136,208 @@ function SourceFavicon({
   );
 }
 
-/**
- * Web search sources (inline collapsible, mirroring the desktop app): a chip
- * with stacked favicons + "{count}个来源" under the answer, expanding to a list
- * of favicon + domain + title + snippet entries. Defaults to collapsed, same
- * interaction as the reasoning panel.
- */
-export function MessageSources({ parts }: { parts: ChatMessage["parts"] }) {
+export function MessageSources({ message }: { message: ChatMessage }) {
   const t = useTranslations("chat");
-  const [open, setOpen] = useState(false);
-  const toggleOpen = useCallback(() => {
-    setOpen((value) => !value);
-  }, []);
-  const sources = collectSources(parts);
-  if (sources.length === 0) {
+  const context = useContext(MessageSourcesContext);
+  const toggleSources = context?.toggleSources;
+  const handleClick = useCallback(
+    (event: MouseEvent<HTMLButtonElement>) => {
+      toggleSources?.(message.id, event.currentTarget);
+    },
+    [message.id, toggleSources]
+  );
+  const sources = collectSources(message.parts);
+  if (!context || sources.length === 0) {
     return null;
+  }
+  const open = context.activeMessageId === message.id;
+
+  return (
+    <div className="not-prose" data-testid="web-search-sources">
+      <Button
+        aria-controls={open ? PANEL_ID : undefined}
+        aria-expanded={open}
+        className="rounded-full focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={handleClick}
+        size="sm"
+        type="button"
+        variant={open ? "secondary" : "outline"}
+      >
+        <span aria-hidden="true" className="flex">
+          {sources.slice(0, 3).map((source) => (
+            <SourceFavicon
+              className="not-first:-ml-1"
+              host={hostnameOf(source.url)}
+              key={source.url}
+            />
+          ))}
+        </span>
+        {t("sourceCount", { count: sources.length })}
+        <ChevronRightIcon aria-hidden="true" data-icon="inline-end" />
+      </Button>
+    </div>
+  );
+}
+
+function SourceList({ sources }: { sources: DisplaySource[] }) {
+  return (
+    <ul className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain px-3 py-2">
+      {sources.map((source) => {
+        const host = hostnameOf(source.url);
+        const date = displayDate(source.publishedAt);
+        return (
+          <li className="min-w-0 shrink-0" key={source.url}>
+            <a
+              className="flex flex-col gap-1 rounded-lg px-3 py-3 transition-colors hover:bg-muted focus-visible:bg-muted"
+              href={source.url}
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <SourceFavicon host={host} />
+                <span className="truncate">{host}</span>
+                {date ? (
+                  <time className="shrink-0 tabular-nums" dateTime={date}>
+                    {date}
+                  </time>
+                ) : null}
+              </div>
+              <p
+                className="truncate font-semibold text-sm"
+                title={source.title}
+              >
+                {source.title}
+              </p>
+              {source.snippet ? (
+                <p className="line-clamp-2 wrap-break-word text-muted-foreground text-sm">
+                  {source.snippet}
+                </p>
+              ) : null}
+            </a>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+export function MessageSourcesPanel({
+  messageId,
+  onClose,
+  overlay,
+  sources,
+  trigger,
+}: {
+  messageId: string;
+  onClose: () => void;
+  overlay: boolean;
+  sources: DisplaySource[];
+  trigger: HTMLButtonElement;
+}) {
+  const t = useTranslations("chat");
+  const common = useTranslations("common");
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const dockedPanel = useRef<HTMLElement>(null);
+  const title = t("webSourcesTitle", { count: sources.length });
+
+  const closePanel = useCallback(() => {
+    onClose();
+    trigger.focus({ preventScroll: true });
+  }, [onClose, trigger]);
+
+  useEffect(() => {
+    const panel = dockedPanel.current;
+    if (overlay || !panel) {
+      return;
+    }
+    closeButton.current?.focus({ preventScroll: true });
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closePanel();
+      }
+    };
+    panel.addEventListener("keydown", handleEscape);
+    return () => panel.removeEventListener("keydown", handleEscape);
+  }, [closePanel, overlay]);
+
+  const handleOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open) {
+        onClose();
+      }
+    },
+    [onClose]
+  );
+  const restoreSheetFocus = useCallback(
+    (event: Event) => {
+      event.preventDefault();
+      if (
+        trigger.isConnected &&
+        trigger.getAttribute("aria-expanded") === "false"
+      ) {
+        trigger.focus({ preventScroll: true });
+      }
+    },
+    [trigger]
+  );
+
+  if (overlay) {
+    return (
+      <Sheet onOpenChange={handleOpenChange} open>
+        <SheetContent
+          aria-describedby={undefined}
+          data-testid="web-search-sources-panel"
+          id={PANEL_ID}
+          onCloseAutoFocus={restoreSheetFocus}
+          showCloseButton={false}
+          side="right"
+        >
+          <SheetHeader className="h-14 flex-row items-center justify-between gap-2 border-b px-5 py-0">
+            <SheetTitle>{title}</SheetTitle>
+            <SheetClose asChild>
+              <Button
+                aria-label={common("close")}
+                className="focus-visible:ring-2 focus-visible:ring-ring"
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <XIcon aria-hidden="true" />
+              </Button>
+            </SheetClose>
+          </SheetHeader>
+          <SourceList key={messageId} sources={sources} />
+        </SheetContent>
+      </Sheet>
+    );
   }
 
   return (
-    <div className="not-prose flex flex-col" data-testid="web-search-sources">
-      <button
-        aria-expanded={open}
-        className="flex w-fit items-center gap-2 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
-        data-state={open ? "open" : "closed"}
-        onClick={toggleOpen}
-        type="button"
-      >
-        <span className="flex -space-x-1.5">
-          {sources.slice(0, 3).map((source) => (
-            <SourceFavicon host={hostnameOf(source.url)} key={source.url} />
-          ))}
-        </span>
-        <span className="leading-[1.65]">
-          {t("sourceCount", { count: sources.length })}
-        </span>
-        <ChevronDownIcon
-          className={cn(
-            "size-4 shrink-0 transition-transform",
-            open ? "rotate-180" : "rotate-0"
-          )}
-        />
-      </button>
-      {open ? (
-        <section
-          aria-label={t("webSources")}
-          className="mt-1.5 rounded-lg border p-2 text-sm"
+    <aside
+      aria-labelledby={PANEL_TITLE_ID}
+      className="flex min-h-0 w-[clamp(300px,30vw,420px)] shrink-0 flex-col border-l bg-background motion-safe:slide-in-from-right-4 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200"
+      data-testid="web-search-sources-panel"
+      id={PANEL_ID}
+      ref={dockedPanel}
+    >
+      <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b px-5">
+        <h2 className="font-semibold text-base" id={PANEL_TITLE_ID}>
+          {title}
+        </h2>
+        <Button
+          aria-label={common("close")}
+          className="focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={closePanel}
+          ref={closeButton}
+          size="icon"
+          type="button"
+          variant="ghost"
         >
-          <ul className="space-y-0.5">
-            {sources.map((source) => {
-              const host = hostnameOf(source.url);
-              const date = displayDate(source.publishedAt);
-              return (
-                <li className="min-w-0" key={source.url}>
-                  <a
-                    className="flex gap-2.5 rounded-md p-2 transition-colors hover:bg-muted/50"
-                    href={source.url}
-                    rel="noopener noreferrer"
-                    target="_blank"
-                  >
-                    <SourceFavicon className="mt-0.5" host={host} />
-                    <div className="min-w-0 flex-1">
-                      <p className="flex items-center gap-1.5 text-xs text-muted-foreground/80">
-                        <span className="truncate">{host}</span>
-                        {date ? (
-                          <span className="shrink-0 tabular-nums">{date}</span>
-                        ) : null}
-                      </p>
-                      <p className="mt-0.5 line-clamp-1 font-medium text-[13px] leading-5 break-words">
-                        {source.title}
-                      </p>
-                      {source.snippet ? (
-                        <p className="mt-0.5 line-clamp-2 text-[12px] leading-[18px] break-words text-muted-foreground/80">
-                          {source.snippet}
-                        </p>
-                      ) : null}
-                    </div>
-                  </a>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      ) : null}
-    </div>
+          <XIcon aria-hidden="true" />
+        </Button>
+      </header>
+      <SourceList key={messageId} sources={sources} />
+    </aside>
   );
 }

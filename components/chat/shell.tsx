@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePreferences } from "@/components/preferences-provider";
+import { useSidebar } from "@/components/ui/sidebar";
 import { useActiveChat } from "@/hooks/use-active-chat";
 import {
   initialArtifactData,
@@ -16,11 +17,17 @@ import { ChatHeader } from "./chat-header";
 import { DataStreamHandler } from "./data-stream-handler";
 import { Greeting } from "./greeting";
 import { submitEditedMessage } from "./message-editor";
+import {
+  collectSources,
+  MessageSourcesContext,
+  MessageSourcesPanel,
+} from "./message-sources";
 import { Messages } from "./messages";
 import { MultimodalInput } from "./multimodal-input";
 
 export function ChatShell() {
   const { t } = usePreferences();
+  const { isMobile } = useSidebar();
   const pathname = usePathname();
   const {
     chatId,
@@ -46,6 +53,33 @@ export function ChatShell() {
   );
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [desktopSynced, setDesktopSynced] = useState(false);
+  const [selectedSources, setSelectedSources] = useState<{
+    chatId: string;
+    messageId: string;
+    trigger: HTMLButtonElement;
+  } | null>(null);
+  const sourcesSelection =
+    selectedSources?.chatId === chatId ? selectedSources : null;
+  const sourcesMessage = sourcesSelection
+    ? messages.find((message) => message.id === sourcesSelection.messageId)
+    : undefined;
+  const sources = sourcesMessage ? collectSources(sourcesMessage.parts) : [];
+  const activeMessageId = sources.length ? sourcesMessage?.id : undefined;
+  const toggleSources = useCallback(
+    (messageId: string, trigger: HTMLButtonElement) => {
+      setSelectedSources((current) =>
+        current?.chatId === chatId && current.messageId === messageId
+          ? null
+          : { chatId, messageId, trigger }
+      );
+    },
+    [chatId]
+  );
+  const closeSources = useCallback(() => setSelectedSources(null), []);
+  const sourcesContext = useMemo(
+    () => ({ activeMessageId, toggleSources }),
+    [activeMessageId, toggleSources]
+  );
   const hasMessages = messages.length > 0;
   useEffect(() => {
     const controller = new AbortController();
@@ -100,6 +134,7 @@ export function ChatShell() {
       setArtifact(initialArtifactData);
       setEditingMessage(null);
       setAttachments([]);
+      setSelectedSources(null);
     }
   }, [chatId, setArtifact]);
 
@@ -176,19 +211,21 @@ export function ChatShell() {
             </p>
           ) : null}
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
-            <Messages
-              addToolApprovalResponse={addToolApprovalResponse}
-              chatId={chatId}
-              isArtifactVisible={isArtifactVisible}
-              isReadonly={isReadonly}
-              messages={messages}
-              onEditMessage={handleEditMessage}
-              regenerate={regenerate}
-              selectedModelId={currentModelId}
-              setMessages={setMessages}
-              status={status}
-              votes={votes}
-            />
+            <MessageSourcesContext.Provider value={sourcesContext}>
+              <Messages
+                addToolApprovalResponse={addToolApprovalResponse}
+                chatId={chatId}
+                isArtifactVisible={isArtifactVisible}
+                isReadonly={isReadonly}
+                messages={messages}
+                onEditMessage={handleEditMessage}
+                regenerate={regenerate}
+                selectedModelId={currentModelId}
+                setMessages={setMessages}
+                status={status}
+                votes={votes}
+              />
+            </MessageSourcesContext.Provider>
 
             <div
               className={cn(
@@ -255,6 +292,15 @@ export function ChatShell() {
           stop={stop}
           votes={votes}
         />
+        {sourcesSelection && activeMessageId ? (
+          <MessageSourcesPanel
+            messageId={activeMessageId}
+            onClose={closeSources}
+            overlay={isMobile || isArtifactVisible}
+            sources={sources}
+            trigger={sourcesSelection.trigger}
+          />
+        ) : null}
       </div>
 
       <DataStreamHandler />
