@@ -7,7 +7,7 @@
  * 用法（react-server 条件用于加载带 "server-only" 的查询模块）：
  *   NODE_OPTIONS="--conditions react-server" pnpm exec tsx scripts/init-database.ts
  * 可选环境变量：
- *   INIT_ADMIN_EMAIL（默认 admin@piwork.local）
+ *   INIT_ADMIN_EMAIL（默认 admin@piwork.net）
  *   INIT_ADMIN_PASSWORD（默认 piwork-admin-123）
  *   INIT_ADMIN_NAME（默认 平台管理员）
  */
@@ -47,7 +47,7 @@ async function main() {
     return;
   }
 
-  const email = process.env.INIT_ADMIN_EMAIL ?? "admin@piwork.local";
+  const email = process.env.INIT_ADMIN_EMAIL ?? "admin@piwork.net";
   const password = process.env.INIT_ADMIN_PASSWORD ?? "piwork-admin-123";
   const name = process.env.INIT_ADMIN_NAME ?? "平台管理员";
 
