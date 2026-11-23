@@ -69,7 +69,24 @@ export async function PATCH(
         update.defaultModelId = null;
       }
     }
-    const definition = asProviderDefinition(record.definition);
+    // The matching packaged definition is the fresh catalog source (model entries
+    // can ship under the same version); fall back to the saved snapshot only for
+    // installations whose package is gone. Refresh the stored snapshot when the
+    // catalog changed so every consumer sees the same model list.
+    const packagedPlugin = await getBuiltinPluginPackage(record.packageId);
+    const packagedDefinition =
+      packagedPlugin && packagedPlugin.version === record.version
+        ? packagedPlugin.definition
+        : null;
+    const definition =
+      packagedDefinition ?? asProviderDefinition(record.definition);
+    if (
+      packagedDefinition &&
+      JSON.stringify(packagedDefinition.models) !==
+        JSON.stringify(record.definition.models)
+    ) {
+      update.definition = packagedDefinition as Record<string, unknown>;
+    }
     const knownIds = new Set(definition.models.map((model) => model.modelId));
     if (body.enabledModels) {
       if (
@@ -102,7 +119,7 @@ export async function PATCH(
       update.defaultModelId = body.defaultModelId;
     }
     if (body.credentials) {
-      const pluginPackage = await getBuiltinPluginPackage(record.packageId);
+      const pluginPackage = packagedPlugin;
       if (!pluginPackage) {
         return errorResponse(new Error(t("pluginPackageNotFound")), 404);
       }

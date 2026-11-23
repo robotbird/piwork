@@ -51,11 +51,19 @@ export type ProviderModelParameterRule = {
   help?: LocalizedText;
 };
 
-/** 模型能力（迁移自 Dify features / model_properties） */
-export type ProviderModelDefinition = {
+/** 图像生成模型的按张计价（区别于对话模型的每百万 token 计价） */
+export type ProviderImageModelPricing = {
+  currency?: "CNY" | "USD";
+  /** 每张输入参考图片单价；按输出计费的模型可省略 */
+  input?: number;
+  /** 每张输出图片单价（取基准分辨率档） */
+  output: number;
+};
+
+/** 对话模型（迁移自 Dify features / model_properties） */
+export type ProviderChatModelDefinition = {
   /** 上游模型 id，例如 deepseek-v4-flash */
   modelId: string;
-  /** 首期仅 llm；embedding/rerank 等类型在 piwork 有消费 interface 前仅可登记不可启用 */
   modelType: "llm";
   label: LocalizedText;
   features: {
@@ -75,6 +83,31 @@ export type ProviderModelDefinition = {
   pricing?: ProviderModelPricing;
   deprecated?: boolean;
 };
+
+/**
+ * 图像生成模型（文生图 / 图生图编辑）。管理端仅做目录登记与启用开关，
+ * 生成链路由宿主的图像生成消费方按 modelId 调用 DashScope 接口。
+ */
+export type ProviderImageModelDefinition = {
+  /** 上游模型 id，例如 qwen-image-3.0-pro */
+  modelId: string;
+  modelType: "image";
+  label: LocalizedText;
+  features: {
+    /** 支持图像输入（图生图 / 参考图编辑 / 图片翻译） */
+    vision: boolean;
+    /** 可同时输出文本（图文混排） */
+    textOutput?: boolean;
+  };
+  parameterRules?: ProviderModelParameterRule[];
+  pricing?: ProviderImageModelPricing;
+  deprecated?: boolean;
+};
+
+/** 模型目录条目：llm 与 image 两类，按 modelType 判别 */
+export type ProviderModelDefinition =
+  | ProviderChatModelDefinition
+  | ProviderImageModelDefinition;
 
 /** 供应商静态定义：名称、凭据 schema、模型目录与网络权限声明 */
 export type ProviderDefinition = {

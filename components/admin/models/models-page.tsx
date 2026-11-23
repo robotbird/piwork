@@ -113,13 +113,21 @@ function CapabilityTags({
   models: ModelPluginCatalogItem["models"];
 }) {
   const { t } = usePreferences();
+  const hasImage = models.some((model) => model.modelType === "image");
   const hasVision = models.some((model) => model.features.vision);
-  const hasTools = models.some((model) => model.features.toolCall);
+  const hasTools = models.some(
+    (model) => model.modelType === "llm" && model.features.toolCall
+  );
   return (
     <div className="flex flex-wrap gap-1.5">
       <span className="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground">
         {t("modelPlugins.llm")}
       </span>
+      {hasImage ? (
+        <span className="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground">
+          {t("modelPlugins.image")}
+        </span>
+      ) : null}
       {hasVision ? (
         <span className="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground">
           {t("modelPlugins.vision")}
@@ -144,37 +152,47 @@ function formatContextWindow(value: number): string {
   return String(value);
 }
 
+function Tag({ label }: { label: string }) {
+  return (
+    <span className="rounded-md border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">
+      {label}
+    </span>
+  );
+}
+
 function ModelTags({
   model,
 }: {
   model: ModelPluginCatalogItem["models"][number];
 }) {
   const { t } = usePreferences();
+  if (model.modelType === "image") {
+    return (
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Tag label={t("modelPlugins.image")} />
+        {model.features.vision ? (
+          <Tag label={t("modelPlugins.imageInput")} />
+        ) : null}
+        {model.features.textOutput ? (
+          <Tag label={t("modelPlugins.textOutput")} />
+        ) : null}
+        {model.pricing ? (
+          <Tag
+            label={`${model.pricing.output} ${t("modelPlugins.perImage")}`}
+          />
+        ) : null}
+      </div>
+    );
+  }
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="rounded-md border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">
-        {t("modelPlugins.llm")}
-      </span>
-      <span className="rounded-md border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">
-        {t("modelPlugins.chat")}
-      </span>
-      <span className="rounded-md border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">
-        {formatContextWindow(model.properties.contextSize)}
-      </span>
-      {model.features.vision ? (
-        <span className="rounded-md border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">
-          {t("modelPlugins.vision")}
-        </span>
-      ) : null}
-      {model.features.toolCall ? (
-        <span className="rounded-md border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">
-          {t("modelPlugins.tools")}
-        </span>
-      ) : null}
+      <Tag label={t("modelPlugins.llm")} />
+      <Tag label={t("modelPlugins.chat")} />
+      <Tag label={formatContextWindow(model.properties.contextSize)} />
+      {model.features.vision ? <Tag label={t("modelPlugins.vision")} /> : null}
+      {model.features.toolCall ? <Tag label={t("modelPlugins.tools")} /> : null}
       {model.features.reasoning ? (
-        <span className="rounded-md border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">
-          {t("modelPlugins.reasoning")}
-        </span>
+        <Tag label={t("modelPlugins.reasoning")} />
       ) : null}
     </div>
   );
@@ -476,11 +494,12 @@ function ConfigureDialog({
                             model.label.en}
                         </p>
                         <p className="truncate text-xs text-muted-foreground">
-                          {model.modelId} ·{" "}
-                          {model.properties.contextSize.toLocaleString(
-                            language
-                          )}{" "}
-                          {t("modelPlugins.context")}
+                          {model.modelId}
+                          {model.modelType === "llm"
+                            ? ` · ${model.properties.contextSize.toLocaleString(language)} ${t("modelPlugins.context")}`
+                            : model.pricing
+                              ? ` · ${model.pricing.output} ${t("modelPlugins.perImage")}`
+                              : ""}
                         </p>
                       </div>
                       <Button
@@ -714,8 +733,8 @@ export function ModelsPage({ initialData }: { initialData: ModelPluginsView }) {
                               ? item.credentialReadable === false
                                 ? t("modelPlugins.credentialsUnreadable")
                                 : item.enabled
-                                ? t("modelPlugins.healthy")
-                                : t("skills.disabled")
+                                  ? t("modelPlugins.healthy")
+                                  : t("skills.disabled")
                               : t("modelPlugins.apiKeyRequired")}
                           </p>
                           {item.credentialsConfigured ? null : (

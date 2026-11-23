@@ -58,6 +58,36 @@ piwork 模型供应商插件（TypeScript），由 Dify 官方插件
 - 翻译模型 `qwen-mt-plus`/`qwen-mt-turbo` 的 `translation_options`、
   `domains` 参数保留为目录参数规则，由调用方按 DashScope 文档传参。
 
+## 图像生成模型目录（imageModelCatalog）
+
+在 Dify 迁移目录之外，按百炼官方「图像生成」文档与价格页
+（华北2/北京，`help.aliyun.com/zh/model-studio`，2026-11 核对）整理了
+31 个图像生成模型（`src/models.ts` 的 `imageModelCatalog`，SDK 类型
+`modelType: "image"`，按张计价）：
+
+- **千问图像**：qwen-image-3.0-pro / 3.0 / 2.1-pro / 2.1-turbo /
+  2.0-pro / 2.0（文生图 + 图生图编辑；2.0 系列属早期版本，已标
+  `deprecated`）
+- **千问图像翻译**：qwen-mt-image-2.0（qwen-mt-image 已标 `deprecated`）
+- **Z-Image**：z-image-turbo（文生图）
+- **万相文生图**：wan2.6-t2i、wan2.5-t2i-preview、wan2.2-t2i-plus /
+  flash、wanx2.1-t2i-plus / turbo、wanx2.0-t2i-turbo、wanx-v1
+- **万相图像生成与编辑**：wan2.7-image-pro、wan2.7-image、wan2.6-image
+  （图文混排，`textOutput`）
+- **万相图像编辑**：wan2.5-i2i-preview、wanx2.1-imageedit（已标
+  `deprecated`）
+- **三方直供**：可灵 kling-v3 / kling-v3-omni、Vidu 生图系列
+  （viduq3.1-fast / viduq3-fast / viduq2-pro / viduq2-fast /
+  vidu-image / -pro / -lite）
+
+价格取官方价格页基准档（元/张）；分辨率档位差价（如 qwen-image-3.0-pro
+2K 0.5 元/张、可灵 4K 0.4 元/张）以官网为准。文档标注「仅供免费体验、
+额度用完后不可调用」的创意工具类模型（涂鸦作画、图像局部重绘、人像
+风格重绘、虚拟模特、鞋靴模特、创意海报、擦除补全、实例分割）不收录。
+
+图像模型仅在管理端做目录登记与启用开关；宿主聊天链路（Pi Provider、
+RunManager）仍只消费 `modelType: "llm"` 的目录条目。
+
 ## 打包
 
 ```bash

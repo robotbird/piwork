@@ -3,7 +3,7 @@ import type {
   ValidateCredentialsContext,
 } from "@piwork/model-provider-sdk";
 
-import { modelCatalog } from "./models";
+import { imageModelCatalog, modelCatalog } from "./models";
 
 /**
  * DashScope OpenAI 兼容模式端点（Dify models/_common.py 的
@@ -55,8 +55,9 @@ export const definition: ProviderDefinition = {
   ],
   defaultBaseUrl: DEFAULT_BASE_URL,
   description: {
-    en: "Alibaba Cloud Model Studio (DashScope) Tongyi Qwen chat models with thinking mode, tool calling, and vision.",
-    "zh-CN": "阿里云百炼通义千问系列模型，支持思考模式、工具调用与视觉理解。",
+    en: "Alibaba Cloud Model Studio (DashScope) Tongyi models: Qwen chat models with thinking mode, tool calling, and vision, plus image generation (Qwen-Image, Z-Image, Wan, Kling, Vidu).",
+    "zh-CN":
+      "阿里云百炼通义系列模型：通义千问对话模型（思考模式、工具调用与视觉理解）与图像生成模型（千问图像、Z-Image、万相、可灵、Vidu）。",
   },
   help: {
     title: {
@@ -68,7 +69,7 @@ export const definition: ProviderDefinition = {
       "zh-CN": "https://bailian.console.aliyun.com/?apiKey=1#/api-key",
     },
   },
-  models: modelCatalog,
+  models: [...modelCatalog, ...imageModelCatalog],
   name: { en: "Tongyi", "zh-CN": "通义" },
   networkHosts: ["dashscope.aliyuncs.com"],
   provider: "tongyi",

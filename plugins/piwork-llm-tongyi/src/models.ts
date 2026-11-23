@@ -1,11 +1,14 @@
-import type { ProviderModelDefinition } from "@piwork/model-provider-sdk";
+import type {
+  ProviderChatModelDefinition,
+  ProviderImageModelDefinition,
+} from "@piwork/model-provider-sdk";
 
 /**
  * piwork-llm-tongyi 模型目录：由 Dify langgenius-tongyi_0.2.22 的
  * models/llm/*.yaml 迁移而来（98 个对话模型，按 _position.yaml 排序）。
  * 价格已按 Dify pricing unit 折算为每百万 token；汇率与刊例价以供应商官网为准。
  */
-export const modelCatalog: ProviderModelDefinition[] = [
+export const modelCatalog: ProviderChatModelDefinition[] = [
   {
     features: {
       reasoning: true,
@@ -13846,5 +13849,248 @@ export const modelCatalog: ProviderModelDefinition[] = [
       defaultMaxTokens: 8192,
       mode: "chat",
     },
+  },
+];
+
+/**
+ * piwork-llm-tongyi 图像生成目录：按百炼「图像生成」官方文档与价格页
+ * （华北2/北京，help.aliyun.com/zh/model-studio，2026-11 核对）整理，
+ * 覆盖千问图像、千问图像翻译、Z-Image、万相文生图/图像编辑与可灵、Vidu
+ * 三方模型；价格单位为元/张（取基准分辨率档，档位差价见官网）。
+ * 文档标注「仅供免费体验、额度用完不可调用」的创意工具类模型
+ * （涂鸦作画、局部重绘、虚拟模特、鞋靴模特、海报生成、擦除补全、
+ * 实例分割、风格重绘）不收录。
+ */
+export const imageModelCatalog: ProviderImageModelDefinition[] = [
+  {
+    features: { vision: true },
+    label: { en: "Qwen-Image 3.0 Pro", "zh-CN": "千问图像生成与编辑 3.0 Pro" },
+    modelId: "qwen-image-3.0-pro",
+    modelType: "image",
+    pricing: { currency: "CNY", input: 0.02, output: 0.25 },
+  },
+  {
+    features: { vision: true },
+    label: { en: "Qwen-Image 3.0", "zh-CN": "千问图像生成与编辑 3.0" },
+    modelId: "qwen-image-3.0",
+    modelType: "image",
+    pricing: { currency: "CNY", input: 0.02, output: 0.18 },
+  },
+  {
+    features: { vision: true },
+    label: { en: "Qwen-Image 2.1 Pro", "zh-CN": "千问图像生成与编辑 2.1 Pro" },
+    modelId: "qwen-image-2.1-pro",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.25 },
+  },
+  {
+    features: { vision: true },
+    label: {
+      en: "Qwen-Image 2.1 Turbo",
+      "zh-CN": "千问图像生成与编辑 2.1 极速版",
+    },
+    modelId: "qwen-image-2.1-turbo",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.1 },
+  },
+  {
+    deprecated: true,
+    features: { vision: true },
+    label: {
+      en: "Qwen-Image 2.0 Pro",
+      "zh-CN": "千问图像生成与编辑 2.0 专业版",
+    },
+    modelId: "qwen-image-2.0-pro",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.5 },
+  },
+  {
+    deprecated: true,
+    features: { vision: true },
+    label: { en: "Qwen-Image 2.0", "zh-CN": "千问图像生成与编辑 2.0" },
+    modelId: "qwen-image-2.0",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.2 },
+  },
+  {
+    features: { vision: true },
+    label: { en: "Qwen-MT-Image 2.0", "zh-CN": "千问图像翻译 2.0" },
+    modelId: "qwen-mt-image-2.0",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.004 },
+  },
+  {
+    deprecated: true,
+    features: { vision: true },
+    label: { en: "Qwen-MT-Image", "zh-CN": "千问图像翻译" },
+    modelId: "qwen-mt-image",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.003 },
+  },
+  {
+    features: { vision: false },
+    label: { en: "Z-Image-Turbo", "zh-CN": "Z-Image-Turbo" },
+    modelId: "z-image-turbo",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.1 },
+  },
+  {
+    features: { vision: false },
+    label: { en: "Wan 2.6 Text-to-Image", "zh-CN": "万相文生图 2.6" },
+    modelId: "wan2.6-t2i",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.2 },
+  },
+  {
+    features: { vision: false },
+    label: { en: "Wan 2.5 T2I Preview", "zh-CN": "万相文生图 2.5 Preview" },
+    modelId: "wan2.5-t2i-preview",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.2 },
+  },
+  {
+    features: { vision: false },
+    label: { en: "Wan 2.2 T2I Plus", "zh-CN": "万相文生图 2.2 专业版" },
+    modelId: "wan2.2-t2i-plus",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.2 },
+  },
+  {
+    features: { vision: false },
+    label: { en: "Wan 2.2 T2I Flash", "zh-CN": "万相文生图 2.2 极速版" },
+    modelId: "wan2.2-t2i-flash",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.14 },
+  },
+  {
+    features: { vision: false },
+    label: { en: "Wanx 2.1 T2I Plus", "zh-CN": "万相文生图 2.1 专业版" },
+    modelId: "wanx2.1-t2i-plus",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.2 },
+  },
+  {
+    features: { vision: false },
+    label: { en: "Wanx 2.1 T2I Turbo", "zh-CN": "万相文生图 2.1 极速版" },
+    modelId: "wanx2.1-t2i-turbo",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.14 },
+  },
+  {
+    features: { vision: false },
+    label: { en: "Wanx 2.0 T2I Turbo", "zh-CN": "万相文生图 2.0 极速版" },
+    modelId: "wanx2.0-t2i-turbo",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.04 },
+  },
+  {
+    deprecated: true,
+    features: { vision: true },
+    label: { en: "Wanx V1", "zh-CN": "万相文生图 V1" },
+    modelId: "wanx-v1",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.16 },
+  },
+  {
+    features: { vision: true },
+    label: { en: "Wan 2.7 Image Pro", "zh-CN": "万相图像 2.7 专业版" },
+    modelId: "wan2.7-image-pro",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.5 },
+  },
+  {
+    features: { vision: true },
+    label: { en: "Wan 2.7 Image", "zh-CN": "万相图像 2.7" },
+    modelId: "wan2.7-image",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.2 },
+  },
+  {
+    features: { textOutput: true, vision: true },
+    label: { en: "Wan 2.6 Image", "zh-CN": "万相图像 2.6" },
+    modelId: "wan2.6-image",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.2 },
+  },
+  {
+    features: { vision: true },
+    label: {
+      en: "Wan 2.5 Image Edit Preview",
+      "zh-CN": "万相图像编辑 2.5 Preview",
+    },
+    modelId: "wan2.5-i2i-preview",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.2 },
+  },
+  {
+    deprecated: true,
+    features: { vision: true },
+    label: { en: "Wanx 2.1 Image Edit", "zh-CN": "万相通用图像编辑 2.1" },
+    modelId: "wanx2.1-imageedit",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.14 },
+  },
+  {
+    features: { vision: true },
+    label: { en: "Kling V3 Image", "zh-CN": "可灵图像生成 V3" },
+    modelId: "kling/kling-v3-image-generation",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.2 },
+  },
+  {
+    features: { vision: true },
+    label: { en: "Kling V3 Omni Image", "zh-CN": "可灵全模态图像生成 V3" },
+    modelId: "kling/kling-v3-omni-image-generation",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.2 },
+  },
+  {
+    features: { vision: true },
+    label: { en: "Vidu Q3.1 Fast Image", "zh-CN": "Vidu Q3.1 生图（快速）" },
+    modelId: "vidu/viduq3.1-fast_reference2image",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.25 },
+  },
+  {
+    features: { vision: true },
+    label: { en: "Vidu Q3 Fast Image", "zh-CN": "Vidu Q3 生图（快速）" },
+    modelId: "vidu/viduq3-fast_reference2image",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.468_75 },
+  },
+  {
+    features: { vision: true },
+    label: { en: "Vidu Q2 Pro Image", "zh-CN": "Vidu Q2 生图 Pro" },
+    modelId: "vidu/viduq2-pro_reference2image",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.9375 },
+  },
+  {
+    features: { vision: true },
+    label: { en: "Vidu Q2 Fast Image", "zh-CN": "Vidu Q2 生图 Fast" },
+    modelId: "vidu/viduq2-fast_reference2image",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.281_25 },
+  },
+  {
+    features: { vision: true },
+    label: { en: "Vidu Image", "zh-CN": "Vidu 生图" },
+    modelId: "vidu/vidu-image_reference2image",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.625 },
+  },
+  {
+    features: { vision: true },
+    label: { en: "Vidu Image Pro", "zh-CN": "Vidu 生图 Pro" },
+    modelId: "vidu/vidu-image-pro_reference2image",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 1.6875 },
+  },
+  {
+    features: { vision: true },
+    label: { en: "Vidu Image Lite", "zh-CN": "Vidu 生图 Lite" },
+    modelId: "vidu/vidu-image-lite_reference2image",
+    modelType: "image",
+    pricing: { currency: "CNY", output: 0.3125 },
   },
 ];

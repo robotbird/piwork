@@ -1,11 +1,11 @@
-import type { ProviderModelDefinition } from "@piwork/model-provider-sdk";
+import type { ProviderChatModelDefinition } from "@piwork/model-provider-sdk";
 
 /**
  * DeepSeek 模型目录：由 Dify langgenius/deepseek 0.0.24 的
  * models/llm/*.yaml 迁移而来（deepseek-flash / deepseek-v4-flash /
  * deepseek-v4-flash-vision-exp / deepseek-v4-pro）。
  */
-export const modelCatalog: ProviderModelDefinition[] = [
+export const modelCatalog: ProviderChatModelDefinition[] = [
   {
     features: {
       reasoning: true,

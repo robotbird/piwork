@@ -1,11 +1,11 @@
-import type { ProviderModelDefinition } from "@piwork/model-provider-sdk";
+import type { ProviderChatModelDefinition } from "@piwork/model-provider-sdk";
 
 /**
  * piwork-llm-zhipuai 模型目录：由 Dify langgenius-zhipuai_0.0.35 的
  * models/llm/*.yaml 迁移而来（43 个对话模型，按 _position.yaml 排序）。
  * 价格已按 Dify pricing unit 折算为每百万 token；汇率与刊例价以供应商官网为准。
  */
-export const modelCatalog: ProviderModelDefinition[] = [
+export const modelCatalog: ProviderChatModelDefinition[] = [
   {
     features: {
       reasoning: false,

@@ -38,8 +38,10 @@ export async function loadModelPluginsView(): Promise<ModelPluginsView> {
           credentialReadable = false;
         }
       }
-      // Legacy installations keep their saved schema/models; only public endpoint metadata
-      // falls back to the matching packaged definition, never a provider name guess.
+      // Legacy installations keep their saved schema/models only when the matching
+      // package is gone; a matching packaged definition is the fresh catalog source
+      // (e.g. new model entries shipped under the same version), so it wins for the
+      // model list while credential fields stay with the saved schema.
       const packaged = catalog.find(
         (item) =>
           item.packageId === record.packageId && item.version === record.version
@@ -56,7 +58,7 @@ export async function loadModelPluginsView(): Promise<ModelPluginsView> {
         enabledModels: record.enabledModels,
         healthStatus: record.healthStatus,
         id: record.id,
-        models: definition.models,
+        models: packaged?.models ?? definition.models,
         name: record.displayName,
         packageId: record.packageId,
         providerKey: record.providerKey,

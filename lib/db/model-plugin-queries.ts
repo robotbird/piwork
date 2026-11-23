@@ -88,6 +88,7 @@ export function updatePluginInstallation(
     credentialSummary: Record<string, string>;
     credentialsConfigured: boolean;
     defaultModelId: string | null;
+    definition: Record<string, unknown>;
     enabled: boolean;
     enabledModels: string[];
     encryptedCredentials: string;
