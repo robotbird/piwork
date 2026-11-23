@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { getTranslations } from "next-intl/server";
 import { auth } from "@/app/(auth)/auth";
 import type { VisibilityType } from "@/components/chat/visibility-selector";
+import { getPreferredModelId } from "@/lib/ai/active-models";
 import { completePiText } from "@/lib/ai/pi";
 import { titlePrompt } from "@/lib/ai/prompts";
 import { checkUserTokenQuota, getUserModelCatalog } from "@/lib/ai/role-access";
@@ -32,7 +33,8 @@ export async function generateTitleFromUserMessage({
     throw new Error(t("unauthorizedAccess"));
   }
   const catalog = await getUserModelCatalog(session.user.id);
-  const modelId = catalog.defaultModelId ?? catalog.models[0]?.id;
+  // 虚拟条目（Auto 等）置顶展示但不作标题模型：直调路径无会话侧路由
+  const modelId = getPreferredModelId(catalog);
   if (!modelId) {
     throw new Error(t("noAuthorizedModel"));
   }

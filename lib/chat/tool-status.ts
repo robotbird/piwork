@@ -5,6 +5,7 @@ const LABEL_KEYS: Record<string, string> = {
   create_skill: "toolStatus.create_skill",
   deliver_file: "toolStatus.deliver_file",
   edit: "toolStatus.edit",
+  image_gen: "toolStatus.image_gen",
   load_skill: "toolStatus.load_skill",
   mcp: "toolStatus.mcp",
   mcpScript: "toolStatus.mcpScript",

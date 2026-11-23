@@ -1,5 +1,10 @@
 import "server-only";
 
+import type { ProviderChatModelDefinition } from "@piwork/model-provider-sdk";
+import {
+  getImageGenerationInfo,
+  IMAGE_VIRTUAL_MODEL_ID,
+} from "@/lib/ai/image-generation";
 import {
   type ChatModel,
   chatModels,
@@ -7,7 +12,9 @@ import {
   getCapabilities,
   type ModelCapabilities,
 } from "@/lib/ai/models";
+import { AUTO_VIRTUAL_MODEL_ID } from "@/lib/ai/virtual-models";
 import { isTestEnvironment } from "@/lib/constants";
+
 import {
   loadPluginInstallations,
   type PluginInstallationRuntime,
@@ -33,11 +40,19 @@ export function compositeModelId(
   return `${providerName}/${modelId}`;
 }
 
-/** 平台配置的优先模型：默认模型 → 首个模型；未配置时返回 null，由调用方处理 */
+/**
+ * 平台配置的优先模型：默认模型 → 首个物理模型；未配置时返回 null，由调用方处理。
+ * 虚拟条目（provider "piwork"，如 Auto）不作为优先默认——标题生成、定时
+ * 任务等直调路径不经过会话侧路由注册，拿到虚拟 id 会直接失败。
+ */
 export function getPreferredModelId(
   catalog: ActiveModelCatalog
 ): string | null {
-  return catalog.defaultModelId ?? catalog.models[0]?.id ?? null;
+  return (
+    catalog.defaultModelId ??
+    catalog.models.find((model) => model.provider !== "piwork")?.id ??
+    null
+  );
 }
 
 /**
@@ -86,6 +101,39 @@ export async function getActiveModelCatalog(): Promise<ActiveModelCatalog> {
       defaultPlugin.defaultModelId
     );
   }
+  // 虚拟模型（Pi virtual model）置顶展示：Auto 第一，图像生成随后。
+  // 仅需至少一个物理模型可用；不参与 defaultModelId 回退
+  // （getPreferredModelId 跳过虚拟条目）。
+  const physicalModels = catalog.models.filter(
+    (model) => model.provider !== "piwork"
+  );
+  const virtualEntries: (ChatModel & { capabilities: ModelCapabilities })[] =
+    [];
+  if (physicalModels.length > 0) {
+    virtualEntries.push({
+      capabilities: { reasoning: true, tools: true, vision: false },
+      description:
+        "按提示词自动路由：复杂任务走高质量模型，简单问题与摘要走快速模型，会话内同档保持不变",
+      id: AUTO_VIRTUAL_MODEL_ID,
+      name: "Auto 智能路由",
+      provider: "piwork",
+      providerKey: "piwork",
+      providerName: "Piwork",
+    });
+  }
+  const imageGeneration = await getImageGenerationInfo();
+  if (imageGeneration && physicalModels.length > 0) {
+    virtualEntries.push({
+      capabilities: { reasoning: false, tools: true, vision: false },
+      description: `图像生成模式：对话模型编排 image_gen 工具出图（${imageGeneration.models.length} 个图像模型，默认 ${imageGeneration.defaultModelId}）`,
+      id: IMAGE_VIRTUAL_MODEL_ID,
+      name: "图像生成",
+      provider: "piwork",
+      providerKey: "piwork",
+      providerName: "Piwork",
+    });
+  }
+  catalog.models = [...virtualEntries, ...catalog.models];
   cache = { catalog, expiresAt: Date.now() + CATALOG_TTL_MS };
   return catalog;
 }
@@ -94,14 +142,16 @@ export function invalidateActiveModelCatalog(): void {
   cache = null;
 }
 
-/** 插件目录模型 → 聊天模型条目（能力来自插件 definition） */
+/** 插件目录模型 → 聊天模型条目（能力来自插件 definition；image 模型不进聊天目录） */
 function pluginCatalogModels(
   plugin: PluginInstallationRuntime
 ): (ChatModel & { capabilities: ModelCapabilities })[] {
   const providerName =
     pickLocalizedText(plugin.definition.name) || plugin.displayName;
   return plugin.models
-    .filter((model) => model.modelType === "llm")
+    .filter(
+      (model): model is ProviderChatModelDefinition => model.modelType === "llm"
+    )
     .map((model) => ({
       capabilities: {
         reasoning: model.features.reasoning,

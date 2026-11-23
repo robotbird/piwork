@@ -24,7 +24,9 @@ import {
 } from "@/lib/pi-packages/manager";
 import { isTestEnvironment } from "../constants";
 import { agentToolToToolDefinition } from "./agent-tools";
+import { imageGenVirtualModelDefinition } from "./image-generation";
 import { getActivePiProviders } from "./pi";
+import { autoVirtualModelDefinition } from "./virtual-models";
 
 // e2e 环境未播种 .piwork/pi-agent:PI_OFFLINE 阻止 loader 网络安装,
 // 聊天照常工作(无 mcp 工具),保证测试确定性。
@@ -47,6 +49,13 @@ export type PiworkAgentSessionOptions = {
   /** 既有对话(有损重建的文本消息) */
   historyMessages: Message[];
   model: Model<Api>;
+  /** 虚拟模型（图像生成）选中时的编排物理模型（route 的默认派发目标） */
+  virtualOrchestrator?: Model<Api>;
+  /** 虚拟模型 Auto 的分档候选；提供时注册 Auto 虚拟模型 */
+  autoVirtualRouting?: {
+    fast: Model<Api>;
+    quality?: Model<Api>;
+  };
   /** 基础系统提示(替换 pi 默认 persona;<tools> 段由会话自管) */
   systemPrompt: string;
   /** piwork 侧 AgentTool(技能工具 + deliver_file),内部适配为 ToolDefinition */
@@ -102,6 +111,18 @@ export async function createPiworkAgentSession(
   const modelRuntime = await ModelRuntime.create({
     credentials: createPluginCredentialStore(),
   });
+  // 「图像生成」虚拟模型（Pi virtual model）：选中时按请求路由到编排 LLM，
+  // 出图由 image_gen 平台工具完成。始终注册（未选中时零开销）。
+  modelRuntime.registerVirtualModel(
+    imageGenVirtualModelDefinition(() => options.virtualOrchestrator)
+  );
+  // 「Auto 智能路由」虚拟模型：按提示词在 fast/quality 物理模型间路由；
+  // 候选由 chat route 从用户授权目录解析（未提供 = 不注册，目录侧同步不展示）
+  if (options.autoVirtualRouting) {
+    modelRuntime.registerVirtualModel(
+      autoVirtualModelDefinition(options.autoVirtualRouting)
+    );
+  }
 
   const settingsManager = options.disableImageAutoResize
     ? SettingsManager.inMemory({ images: { autoResize: false } })

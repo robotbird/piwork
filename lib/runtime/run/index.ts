@@ -226,8 +226,27 @@ const resolved = resolveBackend();
 
 runtimeGlobal.workerId ??= globalThis.crypto.randomUUID();
 runtimeGlobal.manager ??= new RunManager({
-  authorizeStart: async (input) =>
-    authorizeRoleRun(input.userId, input.spec.model),
+  authorizeStart: async (input) => {
+    // 虚拟模型（provider "piwork"）的实际消费是路由目标：改验编排候选
+    // 的授权（fast 恒验；quality/autoVirtualRouting 存在时一并验）
+    const routes =
+      input.spec.model.provider === "piwork"
+        ? [
+            ...(input.spec.virtualOrchestrator
+              ? [input.spec.virtualOrchestrator]
+              : []),
+            ...(input.spec.autoVirtualRouting
+              ? [
+                  input.spec.autoVirtualRouting.fast,
+                  ...(input.spec.autoVirtualRouting.quality
+                    ? [input.spec.autoVirtualRouting.quality]
+                    : []),
+                ]
+              : []),
+          ]
+        : undefined;
+    return authorizeRoleRun(input.userId, input.spec.model, routes);
+  },
   ...resolved,
   checkRecordedQuota: checkUserTokenQuota,
   eventStore: new PostgresEventStore(),

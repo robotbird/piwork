@@ -1,8 +1,10 @@
+import type { Api, Model } from "@earendil-works/pi-ai";
 import { geolocation } from "@vercel/functions";
 import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import { checkBotId } from "botid/server";
 import { getTranslations } from "next-intl/server";
 import { auth, type UserType } from "@/app/(auth)/auth";
+import { getPreferredModelId } from "@/lib/ai/active-models";
 import {
   buildExecutionSystemPrompt,
   ensureChatWorkspace,
@@ -18,6 +20,7 @@ import {
 import { DocumentInputError } from "@/lib/ai/document-errors";
 import { entitlementsByUserType } from "@/lib/ai/entitlements";
 import { classifyExecution } from "@/lib/ai/execution-classifier";
+import { getImageGenerationSetup } from "@/lib/ai/image-generation";
 import { loadEnabledManagedProjectSkills } from "@/lib/ai/managed-skills";
 import { getModelAvailability } from "@/lib/ai/models";
 import { getPiModel, toPiHistoryMessages } from "@/lib/ai/pi";
@@ -423,6 +426,61 @@ export async function POST(request: Request) {
       );
     }
     const piModel = await getPiModel(chatModel);
+    // 虚拟模型（Auto / 图像生成）选中时解析物理派发目标。候选一律取自
+    // modelCatalog（当前用户经角色策略授权的目录），不取全局目录——
+    // 受限角色不得被路由到未授权模型。
+    const imageGeneration = await getImageGenerationSetup();
+    const virtualSelected = piModel.provider === "piwork";
+    const autoVirtualSelected = virtualSelected && piModel.id === "auto";
+    const imageVirtualSelected = virtualSelected && piModel.id === "image-gen";
+    if (imageVirtualSelected && !imageGeneration) {
+      return Response.json(
+        { error: "图像生成未配置：需要在管理端安装通义插件并启用图像模型" },
+        { status: 400 }
+      );
+    }
+    const physicalCatalogModels = modelCatalog.models.filter(
+      (model) => model.provider !== "piwork"
+    );
+    let virtualOrchestrator: Model<Api> | undefined;
+    let autoVirtualRouting:
+      | { fast: Model<Api>; quality?: Model<Api> }
+      | undefined;
+    if (virtualSelected) {
+      const fastId =
+        physicalCatalogModels.find((model) => model.capabilities.tools)?.id ??
+        getPreferredModelId(modelCatalog) ??
+        chatModel;
+      virtualOrchestrator = await getPiModel(fastId).catch(() => undefined);
+      if (!virtualOrchestrator) {
+        return Response.json(
+          {
+            error: autoVirtualSelected
+              ? "Auto 模式需要至少一个可用的对话模型"
+              : "图像生成模式需要至少一个可用的对话模型",
+          },
+          { status: 400 }
+        );
+      }
+      if (autoVirtualSelected) {
+        // 高质量档：用户授权目录里按名称/id 特征挑选（目录顺序优先），
+        // 找不到就退化为 fast 单档
+        const qualityId = physicalCatalogModels.find((model) =>
+          /-pro\b|-plus\b|max\b|premium|opus|sonnet|thinking|reasoner|\br1\b/i.test(
+            `${model.id} ${model.name}`
+          )
+        )?.id;
+        const quality = qualityId
+          ? await getPiModel(qualityId).catch(() => undefined)
+          : undefined;
+        autoVirtualRouting = quality
+          ? { fast: virtualOrchestrator, quality }
+          : { fast: virtualOrchestrator };
+      }
+    }
+    // 虚拟选中时辅助直调（联网搜索工具的模型身份等）一律用物理模型，
+    // 避免宿主侧直调拿到未注册路由的虚拟 id
+    const auxiliaryModel = virtualOrchestrator ?? piModel;
     if (
       preparedAttachments.images.length > 0 &&
       !piModel.input.includes("image")
@@ -658,11 +716,21 @@ export async function POST(request: Request) {
                     : []),
                   ...(executionPrompt ? [executionPrompt] : []),
                 ],
+                autoVirtualRouting,
                 chatId: id,
                 historyMessages,
                 // RunManager binds the authenticated actor to this message-level key.
                 hostTools: { idempotencyKey: currentUserMessage.id },
-                model: piModel,
+                // image_gen 由 backend 注入（artifact 卡片闭包），此处只声明可用性
+                imageGeneration: Boolean(imageGeneration),
+                // 沙箱路由矩阵下虚拟模型 pin 成物理编排模型：沙箱内 Pi 无
+                // 会话侧路由注册（fail-closed，不降级），此处显式固定
+                model:
+                  virtualSelected &&
+                  willRunSandbox({ workspaceDir }) &&
+                  virtualOrchestrator
+                    ? virtualOrchestrator
+                    : piModel,
                 skills,
                 systemPrompt: baseSystemPrompt,
                 tools: [
@@ -670,7 +738,7 @@ export async function POST(request: Request) {
                   ...(platformWebSearch && !workspaceDir
                     ? chatWebSearchTools({
                         chatId: id,
-                        model: piModel,
+                        model: auxiliaryModel,
                         userId: session.user.id,
                       })
                     : []),
@@ -679,8 +747,8 @@ export async function POST(request: Request) {
                         createWebSearchBridgeTool({
                           chatId: id,
                           model: {
-                            id: piModel.id,
-                            provider: piModel.provider,
+                            id: auxiliaryModel.id,
+                            provider: auxiliaryModel.provider,
                           },
                           userId: session.user.id,
                         }),
@@ -688,6 +756,7 @@ export async function POST(request: Request) {
                     : []),
                   ...scheduledTaskTools(session.user.id, currentUserMessage.id),
                 ],
+                virtualOrchestrator,
                 workspaceDir,
               },
               userId: session.user.id,

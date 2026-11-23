@@ -22,8 +22,12 @@ export async function getUserModelCatalog(userId: string) {
     ...catalog,
     allowSwitch: access.allowSwitch,
     defaultModelId: access.defaultModelId,
-    models: catalog.models.filter((model) =>
-      access.modelIds.includes(model.id)
+    // 虚拟条目（provider "piwork"）不参与策略过滤：策略是静态 ID 快照，
+    // 新增虚拟入口永远不在旧快照里；真实消费是其路由目标（物理模型，
+    // authorizeRoleRun 对虚拟 run 改验路由候选，照常受策略约束）
+    models: catalog.models.filter(
+      (model) =>
+        model.provider === "piwork" || access.modelIds.includes(model.id)
     ),
     platformModelCount: catalog.models.length,
   };
@@ -49,10 +53,25 @@ export async function checkUserTokenQuota(userId: string, runId?: string) {
 }
 export async function authorizeRoleRun(
   userId: string,
-  model: { provider: string; id: string }
+  model: { provider: string; id: string },
+  /**
+   * 虚拟模型的实际路由目标（物理模型）。提供时改验这些候选的授权——
+   * 虚拟入口本身不是消费单位，fast/quality 候选才是。
+   */
+  routes?: ReadonlyArray<{ provider: string; id: string }>
 ) {
   const catalog = await getUserModelCatalog(userId);
-  if (
+  if (routes) {
+    for (const route of routes) {
+      if (
+        !catalog.models.some(
+          (item) => item.id === `${route.provider}/${route.id}`
+        )
+      ) {
+        throw new ChatbotError("forbidden:model", "Model not authorized");
+      }
+    }
+  } else if (
     !catalog.models.some((item) => item.id === `${model.provider}/${model.id}`)
   ) {
     throw new ChatbotError("forbidden:model", "Model not authorized");

@@ -41,6 +41,15 @@ export type RuntimeSpec = {
   workspaceDir: string | null;
   // TODO(Step 3): RPC 序列化边界上换中性模型引用
   model: Model<Api>;
+  /** 虚拟模型（图像生成）选中时的编排物理模型（Pi virtual model route 目标） */
+  virtualOrchestrator?: Model<Api>;
+  /** 虚拟模型 Auto 的分档候选（fast 恒有；quality 可选） */
+  autoVirtualRouting?: {
+    fast: Model<Api>;
+    quality?: Model<Api>;
+  };
+  /** 图像生成通道可用：backend 据此注入 image_gen 工具（与 deliver_file 同款闭包注入） */
+  imageGeneration?: boolean;
   /** 基础系统提示（替换 pi 默认 persona） */
   systemPrompt: string;
   /** 追加在会话系统提示之后的段落（skills 段 + 执行段） */

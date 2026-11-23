@@ -4,6 +4,7 @@ import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { createPiworkAgentSession } from "@/lib/ai/agent-session";
 import { createDeliverFileTool } from "@/lib/ai/agent-tools";
 import type { StoredFile } from "@/lib/ai/file-store";
+import { createImageGenTool } from "@/lib/ai/image-tools";
 import { MANAGED_AGENT_DIR } from "@/lib/pi-packages/manager";
 import type {
   RuntimeAck,
@@ -59,6 +60,22 @@ export class InProcessBackend implements RuntimeBackend {
     // Step 4 将其替换为 Artifact Gateway 调用时只改本 backend。
     const tools = [
       ...spec.tools,
+      ...(spec.imageGeneration
+        ? [
+            createImageGenTool({
+              cwd: process.cwd(),
+              // 每张图直接作为附件卡片（artifact.created）交付；markdown
+              // 渲染器不放行相对路径图片 URL，卡片是图像的展示形态
+              onDelivered: (file) => {
+                queue.push({ file, type: "artifact.created" });
+              },
+              onStored: (file, size) =>
+                this.archiveFile?.(spec.chatId, file, size) ??
+                Promise.resolve(),
+              workspaceDir: spec.workspaceDir,
+            }),
+          ]
+        : []),
       ...(spec.workspaceDir
         ? [
             createDeliverFileTool({
@@ -76,12 +93,14 @@ export class InProcessBackend implements RuntimeBackend {
 
     const { dispose, session } = await createPiworkAgentSession({
       appendSystemPrompt: spec.appendSystemPrompt,
+      autoVirtualRouting: spec.autoVirtualRouting,
       cwd: spec.workspaceDir ?? MANAGED_AGENT_DIR,
       disableBuiltinTools: !spec.workspaceDir,
       historyMessages: spec.historyMessages,
       model: spec.model,
       systemPrompt: spec.systemPrompt,
       tools,
+      virtualOrchestrator: spec.virtualOrchestrator,
     });
 
     return new InProcessRuntimeSession(dispose, session, queue);

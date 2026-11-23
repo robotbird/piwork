@@ -7,9 +7,11 @@ import {
   CheckIcon,
   FolderIcon,
   HammerIcon,
+  ImageIcon,
   LibraryBigIcon,
   PaperclipIcon,
   PlusIcon,
+  SparklesIcon,
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -1341,9 +1343,12 @@ function ModelSelectorOption({
 
   // 插件模型：图标从模型插件包内读取（/api/models/icon 按 provider key 下发）
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
-  const iconSrc = model.providerKey
-    ? `${basePath}/api/models/icon?provider=${model.providerKey}`
-    : undefined;
+  // 虚拟模型（provider "piwork"）无插件图标可下发：用内建图标，避免破图
+  const isVirtualEntry = model.provider === "piwork";
+  const iconSrc =
+    model.providerKey && !isVirtualEntry
+      ? `${basePath}/api/models/icon?provider=${model.providerKey}`
+      : undefined;
   const logoProvider = model.providerKey ?? model.id.split("/")[0];
 
   const handleSelect = useCallback(() => {
@@ -1364,11 +1369,19 @@ function ModelSelectorOption({
       value={model.id}
     >
       <span className="flex size-4 shrink-0 items-center justify-center overflow-hidden rounded-[5px] bg-muted ring-1 ring-border/50">
-        <ModelSelectorLogo
-          className={iconSrc ? "size-full" : "size-[18px] dark:invert"}
-          provider={logoProvider}
-          src={iconSrc}
-        />
+        {isVirtualEntry ? (
+          model.id === "auto" ? (
+            <SparklesIcon className="size-3 text-foreground" />
+          ) : (
+            <ImageIcon className="size-3 text-foreground" />
+          )
+        ) : (
+          <ModelSelectorLogo
+            className={iconSrc ? "size-full" : "size-[18px] dark:invert"}
+            provider={logoProvider}
+            src={iconSrc}
+          />
+        )}
       </span>
       <span className="min-w-0 flex-1 truncate text-left font-medium">
         {model.name}

@@ -192,6 +192,7 @@ export class SandboxToolsBackend implements RuntimeBackend {
           ...spec.appendSystemPrompt,
           "Execution tools run only in an isolated sandbox. Use workspace-relative file paths. No host filesystem, extensions or MCP access. Deliver final files only through deliver_file when that tool is enabled.",
         ],
+        autoVirtualRouting: spec.autoVirtualRouting,
         cwd: MANAGED_AGENT_DIR,
         disableBuiltinTools: true,
         disableImageAutoResize: true,
@@ -199,6 +200,7 @@ export class SandboxToolsBackend implements RuntimeBackend {
         model: spec.model,
         systemPrompt: spec.systemPrompt,
         tools: [...platformTools, ...bundle.tools],
+        virtualOrchestrator: spec.virtualOrchestrator,
       });
       ({ session } = agent);
       return new InProcessRuntimeSession(agent.dispose, agent.session, queue, {

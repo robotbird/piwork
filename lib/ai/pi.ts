@@ -1,4 +1,5 @@
 import {
+  type AssistantImages,
   type AssistantMessage,
   type Context,
   createModels,
@@ -13,7 +14,17 @@ import {
   getActiveModelCatalog,
   getPreferredModelId,
 } from "@/lib/ai/active-models";
+import {
+  IMAGE_GENERATION_PROVIDER_ID,
+  IMAGE_VIRTUAL_MODEL_ID,
+  imageGenVirtualCatalogModel,
+  resolveImageGenerationProviderSetup,
+} from "@/lib/ai/image-generation";
 import { chatModels } from "@/lib/ai/models";
+import {
+  AUTO_VIRTUAL_MODEL_ID,
+  autoVirtualCatalogModel,
+} from "@/lib/ai/virtual-models";
 import { loadPluginInstallations } from "@/lib/model-plugins/registry";
 import type { ChatMessage } from "@/lib/types";
 import { getTextFromMessage } from "@/lib/utils";
@@ -120,6 +131,12 @@ export function getTestFauxHandle(): FauxProviderHandle | undefined {
 /** 最近一次注册进 pi 的平台目录；引用一致说明缓存未过期，无需重复注册 */
 let registeredCatalog: ActiveModelCatalog | undefined;
 let registeredPluginProviderIds = new Set<string>();
+let imageGenerationProviderActive = false;
+/** 已注册的图像模型（modelId → ImageModel），generateChatImage 直查 */
+let registeredImageModels = new Map<
+  string,
+  Parameters<typeof piModels.generateImages>[0]
+>();
 
 async function ensurePiProviders(): Promise<void> {
   if (isTestEnvironment) {
@@ -143,6 +160,19 @@ async function ensurePiProviders(): Promise<void> {
     piModels.setProvider(plugin.provider);
   }
   registeredPluginProviderIds = nextProviderIds;
+  // 图像生成通道与聊天 provider 同生命周期装配（pi-ai createProvider({images})）
+  const imageSetup = await resolveImageGenerationProviderSetup();
+  if (imageSetup.available && imageSetup.provider) {
+    piModels.setProvider(imageSetup.provider);
+    imageGenerationProviderActive = true;
+    registeredImageModels = new Map(
+      (imageSetup.imageModels ?? []).map((model) => [model.id, model])
+    );
+  } else if (imageGenerationProviderActive) {
+    piModels.deleteProvider(IMAGE_GENERATION_PROVIDER_ID);
+    imageGenerationProviderActive = false;
+    registeredImageModels = new Map();
+  }
   registeredCatalog = catalog;
 }
 
@@ -159,6 +189,14 @@ function splitModelId(modelId: string): { model: string; provider: string } {
 }
 
 export async function getPiModel(modelId: string) {
+  // 虚拟模型（Auto / 图像生成）：目录条目直接构造，路由注册在会话
+  // ModelRuntime 侧（agent-session 按 spec 注入的定义解析）
+  if (modelId === AUTO_VIRTUAL_MODEL_ID) {
+    return autoVirtualCatalogModel();
+  }
+  if (modelId === IMAGE_VIRTUAL_MODEL_ID) {
+    return imageGenVirtualCatalogModel();
+  }
   await ensurePiProviders();
   const { model, provider } = splitModelId(modelId);
   const resolved = piModels.getModel(provider, model);
@@ -166,6 +204,39 @@ export async function getPiModel(modelId: string) {
     throw new Error(`Unsupported chat model: ${modelId}`);
   }
   return resolved;
+}
+
+/**
+ * 平台图像生成入口（pi-ai `Models.generateImages` 官方调用面）。
+ * modelId 是插件目录里的图像模型 id（如 qwen-image-3.0）。
+ */
+export async function generateChatImage({
+  modelId,
+  prompt,
+  n,
+  signal,
+  size,
+}: {
+  modelId: string;
+  prompt: string;
+  n?: number;
+  signal?: AbortSignal;
+  size?: string;
+}): Promise<AssistantImages> {
+  await ensurePiProviders();
+  const model = registeredImageModels.get(modelId);
+  if (!model) {
+    throw new Error(`Unsupported image model: ${modelId}`);
+  }
+  return piModels.generateImages(
+    model,
+    { input: [{ text: prompt, type: "text" }] },
+    {
+      ...(n === undefined ? {} : { n }),
+      ...(size ? { size } : {}),
+      ...(signal ? { signal } : {}),
+    }
+  );
 }
 
 function assistantMessage(text: string, modelId: string): AssistantMessage {
