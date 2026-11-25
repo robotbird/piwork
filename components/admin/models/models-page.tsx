@@ -876,7 +876,7 @@ export function ModelsPage({ initialData }: { initialData: ModelPluginsView }) {
                 {t("modelPlugins.discoverProviders")}
               </h2>
               <div className="relative w-full sm:w-72">
-                <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -t-y-1/2 text-muted-foreground" />
+                <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   aria-label={t("admin.searchProviders")}
                   className="pl-9"
