@@ -50,6 +50,8 @@ export type RuntimeSpec = {
   };
   /** 图像生成通道可用：backend 据此注入 image_gen 工具（与 deliver_file 同款闭包注入） */
   imageGeneration?: boolean;
+  /** Upstream image model pinned by the chat model selection for this run. */
+  imageModelId?: string;
   /** 基础系统提示（替换 pi 默认 persona） */
   systemPrompt: string;
   /** 追加在会话系统提示之后的段落（skills 段 + 执行段） */

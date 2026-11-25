@@ -32,6 +32,8 @@ import {
 } from "../backends/sandbox-rpc/backend";
 import {
   createHostToolsHandler,
+  type HostTool,
+  HostToolsError,
   InferenceProxyServer,
   RunTokenRegistry,
   type UpstreamResolver,
@@ -124,6 +126,7 @@ function buildInferenceOptions(): SandboxInferenceOptions | undefined {
     .map((entry) => entry.trim())
     .filter(Boolean);
   const tokens = new RunTokenRegistry();
+  const imageTools = new Map<string, HostTool>();
   const resolver: UpstreamResolver = async (grant) => {
     const providers = await getActivePiProviders();
     const provider = providers.find(
@@ -156,6 +159,16 @@ function buildInferenceOptions(): SandboxInferenceOptions | undefined {
       tools: {
         [CREATE_SCHEDULED_TASK_TOOL_NAME]: createScheduledTaskHostTool(),
         [WEB_SEARCH_HOST_TOOL_NAME]: createWebSearchHostTool(),
+        image_gen: (context) => {
+          const tool = imageTools.get(context.grant.runId);
+          if (!tool) {
+            throw new HostToolsError(
+              "task_failed",
+              "Image generation is unavailable for this run."
+            );
+          }
+          return tool(context);
+        },
       },
     }),
     resolver,
@@ -171,7 +184,13 @@ function buildInferenceOptions(): SandboxInferenceOptions | undefined {
       await runtimeGlobal.inferenceReady;
       return tokens.mint(request).token;
     },
-    revokeRunTokens: (runId) => tokens.revokeRun(runId),
+    registerImageTool: (runId, tool) => {
+      imageTools.set(runId, tool);
+    },
+    revokeRunTokens: (runId) => {
+      imageTools.delete(runId);
+      return tokens.revokeRun(runId);
+    },
   };
 }
 
@@ -226,7 +245,7 @@ const resolved = resolveBackend();
 
 runtimeGlobal.workerId ??= globalThis.crypto.randomUUID();
 runtimeGlobal.manager ??= new RunManager({
-  authorizeStart: async (input) => {
+  authorizeStart: (input) => {
     // 虚拟模型（provider "piwork"）的实际消费是路由目标：改验编排候选
     // 的授权（fast 恒验；quality/autoVirtualRouting 存在时一并验）
     const routes =

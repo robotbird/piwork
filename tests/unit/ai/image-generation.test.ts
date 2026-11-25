@@ -1,6 +1,6 @@
 import "../../support/runtime-env";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -32,6 +32,7 @@ const MODEL: ImageModel<typeof DASHSCOPE_IMAGES_API> = {
   provider: IMAGE_GENERATION_PROVIDER_ID,
   type: "image",
 };
+const SELECTION = { id: `image-gen/${MODEL.id}`, name: MODEL.name };
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -45,7 +46,7 @@ function routeRequest(
 ): ModelRouteRequest {
   return {
     messages: [],
-    model: imageGenVirtualCatalogModel(),
+    model: imageGenVirtualCatalogModel(SELECTION),
     reason: "user",
     thinkingLevel: "off",
     ...overrides,
@@ -138,31 +139,70 @@ test("dashscope images function rejects async task models with a sync hint", asy
   assert.match(result.errorMessage ?? "", /qwen-image-3\.0/);
 });
 
-test("dashscope images function rejects image input for now", async () => {
+test("dashscope images function maps reference images into the content array", async () => {
   const generateImages = createDashScopeImagesFunction({
     apiKey: "key",
-    baseUrl: "https://dashscope.example/v1",
-    fetchImpl: async () => jsonResponse({ data: [{ b64_json: "eA==" }] }),
+    baseUrl: "https://dashscope.example/compatible-mode/v1",
+    fetchImpl: async (input, init) => {
+      const url = String(input);
+      if (url.includes("multimodal-generation")) {
+        const body = JSON.parse(String(init?.body)) as {
+          input: {
+            messages: Array<{
+              content: Array<{ image?: string; text?: string }>;
+            }>;
+          };
+        };
+        capturedContent = body.input.messages[0]?.content ?? [];
+        return jsonResponse({
+          output: {
+            choices: [
+              {
+                message: {
+                  content: [{ image: "https://img.example/edited.png" }],
+                },
+              },
+            ],
+          },
+        });
+      }
+      return new Response(Buffer.from("edited-bytes"), { status: 200 });
+    },
   });
+  let capturedContent: Array<{ image?: string; text?: string }> = [];
   const result = await generateImages.generateImages(MODEL, {
     input: [
       { data: "eA==", mimeType: "image/png", type: "image" },
-      { text: "edit this", type: "text" },
+      { text: "keep subject, change style to oil painting", type: "text" },
     ],
   });
-  assert.equal(result.stopReason, "error");
-  assert.match(result.errorMessage ?? "", /图生图/);
+  assert.equal(result.stopReason, "stop");
+  assert.equal(capturedContent.length, 2);
+  assert.match(
+    capturedContent[0]?.image ?? "",
+    /^data:image\/png;base64,eA==$/
+  );
+  assert.equal(
+    capturedContent[1]?.text,
+    "keep subject, change style to oil painting"
+  );
 });
 
 test("virtual model route: user message goes to the orchestrator", async () => {
-  const definition = imageGenVirtualModelDefinition(() => ORCHESTRATOR);
+  const definition = imageGenVirtualModelDefinition(
+    () => ORCHESTRATOR,
+    SELECTION
+  );
   const route = await definition.route(routeRequest({ reason: "user" }));
   assert.equal(route.model.id, "orchestrator");
 });
 
 test("virtual model route: continuation sticks to the previous physical model", async () => {
   const previous = { ...ORCHESTRATOR, id: "first-physical" };
-  const definition = imageGenVirtualModelDefinition(() => ORCHESTRATOR);
+  const definition = imageGenVirtualModelDefinition(
+    () => ORCHESTRATOR,
+    SELECTION
+  );
   const route = await definition.route(
     routeRequest({
       previous: { model: previous, thinkingLevel: "off" },
@@ -174,7 +214,10 @@ test("virtual model route: continuation sticks to the previous physical model", 
 
 test("virtual model route: retry prefers the failed model to preserve caches", async () => {
   const failed = { ...ORCHESTRATOR, id: "failed-physical" };
-  const definition = imageGenVirtualModelDefinition(() => ORCHESTRATOR);
+  const definition = imageGenVirtualModelDefinition(
+    () => ORCHESTRATOR,
+    SELECTION
+  );
   const route = await definition.route(
     routeRequest({
       failed: {
@@ -188,17 +231,33 @@ test("virtual model route: retry prefers the failed model to preserve caches", a
 });
 
 test("virtual model route: throws without an orchestrator on user requests", async () => {
-  const definition = imageGenVirtualModelDefinition(() => undefined);
+  const definition = imageGenVirtualModelDefinition(() => undefined, SELECTION);
   await assert.rejects(async () => {
     await definition.route(routeRequest({ reason: "user" }));
   });
 });
 
 test("virtual catalog entry uses the pi-virtual api id", () => {
-  const entry = imageGenVirtualCatalogModel();
+  const entry = imageGenVirtualCatalogModel(SELECTION);
   assert.equal(entry.api, "pi-virtual");
   assert.equal(entry.provider, "piwork");
-  assert.equal(entry.id, "image-gen");
+  assert.equal(entry.id, SELECTION.id);
+});
+
+test("individual image selections keep their Pi virtual model identity", async () => {
+  const selection = {
+    id: "image-gen/kling/kling-v3-image-generation",
+    name: "Kling V3 Image",
+  };
+  const model = imageGenVirtualCatalogModel(selection);
+  const definition = imageGenVirtualModelDefinition(() => ORCHESTRATOR, model);
+  assert.equal(model.id, selection.id);
+  assert.equal(model.name, selection.name);
+  assert.equal(definition.id, selection.id);
+  assert.equal(
+    (await definition.route(routeRequest({ model }))).model.id,
+    ORCHESTRATOR.id
+  );
 });
 
 test("toImageModel keeps catalog ids and zeroes token cost", () => {
@@ -258,6 +317,7 @@ test("image_gen tool writes workspace files, delivers cards, returns urls", asyn
           pricePerImage: 0.18,
         },
       ],
+      providerKey: "tongyi",
       providerName: "通义",
     }),
     onDelivered: (file) => delivered.push(file),
@@ -318,6 +378,7 @@ test("image_gen tool auto-routes quality prompts to the pro model", async () => 
         { modelId: "qwen-image-3.0-pro", name: "千问图像 3.0 Pro" },
         { modelId: "z-image-turbo", name: "Z-Image Turbo" },
       ],
+      providerKey: "tongyi",
       providerName: "通义",
     }),
   });
@@ -329,6 +390,108 @@ test("image_gen tool auto-routes quality prompts to the pro model", async () => 
     "z-image-turbo",
     "qwen-image-3.0",
   ]);
+});
+
+test("an explicit UI selection takes precedence over the prompt and tool arguments", async () => {
+  const selected = "z-image-turbo";
+  const generate = test.mock.fn(async (input: { modelId: string }) => ({
+    api: DASHSCOPE_IMAGES_API,
+    errorMessage: "Mock provider stopped",
+    model: input.modelId,
+    output: [],
+    provider: IMAGE_GENERATION_PROVIDER_ID,
+    stopReason: "error" as const,
+    timestamp: Date.now(),
+  }));
+  const tool = createImageGenTool({
+    generate,
+    getSetup: async () => ({
+      apiKey: "key",
+      baseUrl: "https://dashscope.example/v1",
+      defaultModelId: "qwen-image-3.0-pro",
+      imageModels: [],
+      models: [
+        { modelId: "qwen-image-3.0-pro", name: "Qwen-Image 3.0 Pro" },
+        { modelId: selected, name: "Z-Image Turbo" },
+      ],
+      providerKey: "tongyi",
+      providerName: "Tongyi",
+    }),
+    imageModelId: selected,
+  });
+  await assert.rejects(
+    tool.execute("call-pinned", {
+      model: "qwen-image-3.0-pro",
+      prompt: "Create a high-quality watercolor poster",
+    }),
+    /Mock provider stopped/
+  );
+  assert.equal(generate.mock.calls[0]?.arguments[0].modelId, selected);
+});
+
+test("image_gen tool reads workspace references and routes to edit model", async (t) => {
+  const cwd = await mkdtemp(join(tmpdir(), "piwork-imagegen-ref-"));
+  t.after(() => rm(cwd, { force: true, recursive: true }));
+  await writeFile(join(cwd, "anchor.png"), Buffer.from("anchor-bytes"));
+
+  const calls: Array<{
+    modelId: string;
+    references?: { data: string; mimeType: string }[];
+  }> = [];
+  const tool = createImageGenTool({
+    cwd,
+    generate: async (input) => {
+      calls.push({ modelId: input.modelId, references: input.references });
+      return {
+        api: DASHSCOPE_IMAGES_API,
+        model: input.modelId,
+        output: [
+          {
+            data: Buffer.from("out").toString("base64"),
+            mimeType: "image/png",
+            type: "image",
+          },
+        ],
+        provider: IMAGE_GENERATION_PROVIDER_ID,
+        stopReason: "stop",
+        timestamp: Date.now(),
+      };
+    },
+    getSetup: async () => ({
+      apiKey: "key",
+      baseUrl: "https://dashscope.example/v1",
+      defaultModelId: "qwen-image-3.0",
+      imageModels: [],
+      models: [
+        { modelId: "qwen-image-3.0", name: "千问图像 3.0" },
+        { modelId: "qwen-image-3.0-pro", name: "千问图像 3.0 Pro" },
+        { modelId: "z-image-turbo", name: "Z-Image Turbo" },
+      ],
+      providerKey: "tongyi",
+      providerName: "通义",
+    }),
+    workspaceDir: cwd,
+  });
+  await tool.execute("call-ref", {
+    prompt: "保持主体不变，改成油画风格",
+    references: ["anchor.png"],
+  });
+  assert.equal(calls[0]?.modelId, "qwen-image-3.0");
+  assert.deepEqual(calls[0]?.references, [
+    {
+      data: Buffer.from("anchor-bytes").toString("base64"),
+      mimeType: "image/png",
+    },
+  ]);
+
+  // workspace escape rejected
+  await assert.rejects(
+    tool.execute("call-esc", {
+      prompt: "x",
+      references: ["../outside.png"],
+    }),
+    /inside the chat workspace/
+  );
 });
 
 test("image_gen tool rejects unknown models and missing setup", async () => {

@@ -64,9 +64,6 @@ export function buildVirtualCatalogModel({
   };
 }
 
-/** 「Auto 智能路由」虚拟模型完整 id：聊天目录 / getPiModel 均用该值 */
-export const AUTO_VIRTUAL_MODEL_ID = "piwork/auto";
-
 /** 虚拟模型统一挂载的 provider id（目录/UI 据此识别虚拟条目） */
 export const VIRTUAL_MODEL_PROVIDER = "piwork";
 

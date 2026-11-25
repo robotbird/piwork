@@ -1,11 +1,12 @@
 import "server-only";
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { AssistantImages } from "@earendil-works/pi-ai";
-import { int, obj, opt, str } from "@earendil-works/pi-schema";
+import { arr, int, obj, opt, str } from "@earendil-works/pi-schema";
 import type { DeliveredFileData } from "@/lib/types";
+import { isInsideWorkspace } from "./agent-tools";
 import type { StoredFile } from "./file-store";
 import {
   getImageGenerationSetup,
@@ -25,6 +26,9 @@ import { createPrivateFileStore } from "./private-file-store";
  * 相对路径图片 URL，卡片是图像的正确交付形态。
  */
 
+/** 参考图数量上限（qwen-image 编辑系实测 1–3 张为稳） */
+const MAX_REFERENCE_IMAGES = 3;
+
 // 与 deliver_file 同款出站存储（A5/S5：URL 经鉴权下载路由）
 const imagePrivateStore = createPrivateFileStore();
 
@@ -39,6 +43,8 @@ type ImageGenerateInput = {
   n?: number;
   signal?: AbortSignal;
   size?: string;
+  /** 参考图 base64（图生图/锚点派生；data/mimeType 进入生成请求） */
+  references?: { data: string; mimeType: string }[];
 };
 
 function defaultGenerate(input: ImageGenerateInput): Promise<AssistantImages> {
@@ -77,8 +83,22 @@ function autoReasonFor(modelId: string): string {
 function resolveAutoModel(
   prompt: string,
   models: ImageGenerationModelInfo[],
-  defaultModelId: string
+  defaultModelId: string,
+  hasReferences = false
 ): { modelId: string; reason: string } {
+  // 带参考图（图生图/锚点派生）时优先支持编辑的模型：保主体换风格靠
+  // 参考图硬约束，纯文生图模型会退化成"像但不是同一个"
+  if (hasReferences) {
+    for (const candidate of ["qwen-image-3.0", "qwen-image-3.0-pro"]) {
+      const hit = models.find((item) => item.modelId === candidate);
+      if (hit) {
+        return {
+          modelId: hit.modelId,
+          reason: "按参考图自动选择：千问图像支持图生图编辑与风格派生",
+        };
+      }
+    }
+  }
   for (const candidate of [
     "wan2.7-image-pro",
     "qwen-image-3.0-pro",
@@ -103,6 +123,8 @@ export function createImageGenTool({
   workspaceDir,
   generate = defaultGenerate,
   getSetup = getImageGenerationSetup,
+  imageModelId,
+  allowReferences = true,
   onDelivered,
   onStored,
 }: {
@@ -113,19 +135,23 @@ export function createImageGenTool({
   generate?: (input: ImageGenerateInput) => Promise<AssistantImages>;
   /** 测试注入：替换可用性探测 */
   getSetup?: () => Promise<ImageGenerationSetup | null>;
+  imageModelId?: string;
+  allowReferences?: boolean;
   /** backend 注入：每张图作为附件卡片推送（artifact.created） */
   onDelivered?: (file: DeliveredFileData) => void;
   /** backend 注入：产物归档（与 deliver_file 同款库归档钩子） */
   onStored?: (file: StoredFile, size: number) => Promise<void>;
 } = {}): AgentTool {
   return {
-    description:
-      "Generate images from a text prompt with piwork's image generation models (Tongyi: Qwen-Image, Wan, Z-Image). Call it only when the user explicitly asks to generate/create/paint an image (画一张/生成图片/文生图/帮我画). Pass a complete visual prompt (subject, style, composition, lighting); leave `model` empty for auto-routing by prompt (quality/art → qwen-image-3.0, fast drafts/alternatives → z-image-turbo, text-in-image layouts → wan2.7); do not call it for image processing tasks (use the image-processing skill's local operations instead). Generated images are delivered to the user automatically as attachment cards.",
-    execute: async (toolCallId, params) => {
-      const { model, n, prompt, size } = params as {
+    description: imageModelId
+      ? `Generate an image with the selected model ${imageModelId}. Treat visual descriptions as image requests and pass a complete visual prompt. Generated images are delivered automatically as attachment cards.`
+      : "Generate or edit images with piwork's image generation models (Tongyi: Qwen-Image, Wan, Z-Image). Call it when the user asks to generate/create/paint an image (画一张/生成图片/文生图/帮我画) or to derive/edit from an existing image (换风格/以这张为参考/保持主体改成…). Pass a complete visual prompt (subject, style, composition, lighting); for anchor/style derivation pass workspace image paths via `references` and describe what to change rather than re-describing the scene. Leave `model` empty for auto-routing; do not call it for local pixel operations like watermark removal or background cutout (use the image-processing skill instead). Generated images are delivered to the user automatically as attachment cards.",
+    execute: async (toolCallId, params, signal) => {
+      const { model, n, prompt, references, size } = params as {
         model?: string;
         n?: number;
         prompt: string;
+        references?: string[];
         size?: string;
       };
       const setup = await getSetup();
@@ -134,10 +160,15 @@ export function createImageGenTool({
           "image_gen: 图像生成未配置——需要在管理端安装通义插件、填写凭据并启用图像模型"
         );
       }
-      const auto = !model;
-      const choice = auto
-        ? resolveAutoModel(prompt, setup.models, setup.defaultModelId)
-        : { modelId: model, reason: "" };
+      const requestedModel = imageModelId ?? model;
+      const choice = requestedModel
+        ? { modelId: requestedModel, reason: "" }
+        : resolveAutoModel(
+            prompt,
+            setup.models,
+            setup.defaultModelId,
+            Boolean(references?.length)
+          );
       const info = setup.models.find((item) => item.modelId === choice.modelId);
       if (!info) {
         throw new Error(
@@ -150,10 +181,41 @@ export function createImageGenTool({
         typeof n === "number" && n >= 1
           ? Math.min(Math.floor(n), MAX_IMAGES_PER_CALL)
           : 1;
+      // 参考图：仅接受工作区内的文件（与 deliver_file 同款边界），读成
+      // base64 带进生成请求——锚点链/保真派生的硬约束
+      const workspace = workspaceDir ? path.resolve(cwd, workspaceDir) : null;
+      const referenceInputs: { data: string; mimeType: string }[] = [];
+      if (references?.length) {
+        if (!workspace) {
+          throw new Error(
+            "image_gen: 参考图仅在执行类会话（聊天工作区）中可用；请让用户把参考图上传到对话"
+          );
+        }
+        if (references.length > MAX_REFERENCE_IMAGES) {
+          throw new Error(
+            `image_gen: 参考图最多 ${MAX_REFERENCE_IMAGES} 张（收到 ${references.length} 张）`
+          );
+        }
+        for (const reference of references) {
+          if (!isInsideWorkspace(workspace, reference)) {
+            throw new Error(
+              `image_gen: reference path must be inside the chat workspace: ${reference}`
+            );
+          }
+          // biome-ignore lint/performance/noAwaitInLoops: Bound concurrent reads of reference files.
+          const bytes = await readFile(path.resolve(workspace, reference));
+          referenceInputs.push({
+            data: bytes.toString("base64"),
+            mimeType: "image/png",
+          });
+        }
+      }
       const result = await generate({
         modelId: choice.modelId,
         n: count,
         prompt,
+        references: referenceInputs,
+        signal,
         size,
       });
       if (result.stopReason !== "stop" || result.output.length === 0) {
@@ -161,7 +223,6 @@ export function createImageGenTool({
       }
 
       const stamp = Date.now().toString(36);
-      const workspace = workspaceDir ? path.resolve(cwd, workspaceDir) : null;
       if (workspace) {
         await mkdir(path.join(workspace, "generated"), { recursive: true });
       }
@@ -204,6 +265,7 @@ export function createImageGenTool({
       // 附件卡片交付（backend 注入的 artifact.created 通道）：
       // markdown 渲染器不放行相对路径图片 URL，卡片才是图像的展示形态
       for (const item of outputs) {
+        // biome-ignore lint/performance/noAwaitInLoops: Archive each file before publishing its card in output order.
         await onStored?.(item.stored, item.bytes.byteLength);
         onDelivered?.({
           contentType: "image/png",
@@ -218,7 +280,7 @@ export function createImageGenTool({
       const priceNote = info.pricePerImage
         ? `（${info.pricePerImage} ${info.currency === "CNY" ? "元" : (info.currency ?? "")}/张，共 ${outputs.length} 张）`
         : "";
-      const reasonNote = auto ? `；${choice.reason}` : "";
+      const reasonNote = choice.reason ? `；${choice.reason}` : "";
       const lines = [
         `已用 ${info.name}（${choice.modelId}）生成 ${outputs.length} 张图片${priceNote}${reasonNote}。`,
         "图片已作为附件卡片直接展示给用户，不要再用 Markdown 图片语法重复贴图。",
@@ -244,12 +306,26 @@ export function createImageGenTool({
     label: "Generate image",
     name: "image_gen",
     parameters: obj({
-      model: opt(
-        str({
-          description:
-            "Optional image model id from the platform catalog. Omit for auto-routing by prompt (quality/art → qwen-image-3.0, fast drafts → z-image-turbo, text-in-image layout → wan2.7). Examples: qwen-image-3.0, wan2.6-t2i, z-image-turbo.",
-        })
-      ),
+      ...(imageModelId
+        ? {}
+        : {
+            model: opt(
+              str({
+                description:
+                  "Optional image model id from the platform catalog. Omit for auto-routing by prompt and references.",
+              })
+            ),
+          }),
+      ...(allowReferences
+        ? {
+            references: opt(
+              arr(str(), {
+                description:
+                  "Workspace-relative reference image paths (max 3) for image-to-image: anchor derivation, style transfer, product fidelity. Describe what to change in the prompt, not the whole scene.",
+              })
+            ),
+          }
+        : {}),
       n: opt(
         int({
           description: `Number of images to generate (1-${MAX_IMAGES_PER_CALL}, default 1)`,

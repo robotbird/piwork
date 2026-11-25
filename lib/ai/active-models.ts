@@ -1,18 +1,16 @@
 import "server-only";
 
 import type { ProviderChatModelDefinition } from "@piwork/model-provider-sdk";
+import { getImageGenerationInfo } from "@/lib/ai/image-generation";
 import {
-  getImageGenerationInfo,
-  IMAGE_VIRTUAL_MODEL_ID,
-} from "@/lib/ai/image-generation";
-import {
+  AUTO_VIRTUAL_MODEL_ID,
   type ChatModel,
   chatModels,
   DEFAULT_CHAT_MODEL,
   getCapabilities,
+  IMAGE_VIRTUAL_MODEL_ID,
   type ModelCapabilities,
 } from "@/lib/ai/models";
-import { AUTO_VIRTUAL_MODEL_ID } from "@/lib/ai/virtual-models";
 import { isTestEnvironment } from "@/lib/constants";
 
 import {
@@ -23,6 +21,7 @@ import {
 
 /** 聊天可见的插件模型目录，不包含凭据。 */
 export type ActiveModelCatalog = {
+  defaultImageModelId?: string;
   defaultModelId: string | null;
   models: (ChatModel & { capabilities: ModelCapabilities })[];
 };
@@ -52,9 +51,12 @@ export function compositeModelId(
 export function getPreferredModelId(
   catalog: ActiveModelCatalog
 ): string | null {
+  const physicalModels = catalog.models.filter(
+    (model) => model.provider !== "piwork"
+  );
   return (
-    catalog.defaultModelId ??
-    catalog.models.find((model) => model.provider !== "piwork")?.id ??
+    physicalModels.find((model) => model.id === catalog.defaultModelId)?.id ??
+    physicalModels[0]?.id ??
     null
   );
 }
@@ -125,17 +127,27 @@ export async function getActiveModelCatalog(): Promise<ActiveModelCatalog> {
       providerName: "Piwork",
     });
   }
-  const imageGeneration = await getImageGenerationInfo();
-  if (imageGeneration && physicalModels.length > 0) {
-    virtualEntries.push({
-      capabilities: { reasoning: false, tools: true, vision: false },
-      description: `图像生成模式：对话模型编排 image_gen 工具出图（${imageGeneration.models.length} 个图像模型，默认 ${imageGeneration.defaultModelId}）`,
-      id: IMAGE_VIRTUAL_MODEL_ID,
-      name: "图像生成",
-      provider: "piwork",
-      providerKey: "piwork",
-      providerName: "Piwork",
-    });
+  if (physicalModels.some((model) => model.capabilities.tools)) {
+    const imageGeneration = await getImageGenerationInfo();
+    if (imageGeneration) {
+      catalog.defaultImageModelId = `${IMAGE_VIRTUAL_MODEL_ID}/${imageGeneration.defaultModelId}`;
+      for (const image of imageGeneration.models) {
+        virtualEntries.push({
+          capabilities: {
+            reasoning: false,
+            tools: true,
+            vision: image.vision ?? false,
+          },
+          description: "",
+          id: `${IMAGE_VIRTUAL_MODEL_ID}/${image.modelId}`,
+          imageModelId: image.modelId,
+          name: image.name,
+          provider: "piwork",
+          providerKey: imageGeneration.providerKey,
+          providerName: imageGeneration.providerName,
+        });
+      }
+    }
   }
   catalog.models = [...virtualEntries, ...catalog.models];
   cache = { catalog, expiresAt: Date.now() + CATALOG_TTL_MS, plugins };

@@ -1,4 +1,7 @@
+import { IMAGE_VIRTUAL_MODEL_ID } from "@/lib/ai/models";
+
 export type ChatModelCatalog = {
+  defaultImageModelId?: string;
   defaultModelId: string | null;
   models: { id: string }[];
 };
@@ -13,8 +16,12 @@ export function resolveChatModelId(
   if (!catalog || !Array.isArray(catalog.models)) {
     return null;
   }
-  if (catalog.models.some((model) => model.id === preferredId)) {
-    return preferredId;
+  const requestedId =
+    preferredId === IMAGE_VIRTUAL_MODEL_ID
+      ? catalog.defaultImageModelId
+      : preferredId;
+  if (requestedId && catalog.models.some((model) => model.id === requestedId)) {
+    return requestedId;
   }
   if (catalog.models.some((model) => model.id === catalog.defaultModelId)) {
     return catalog.defaultModelId;

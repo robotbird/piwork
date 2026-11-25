@@ -10,6 +10,8 @@
  * are accepted by pi's validator, see deliver-file-extension.ts).
  */
 
+import type { AgentTool } from "@earendil-works/pi-agent-core";
+
 /** Workspace-relative (sandbox view) drop location. */
 export const HOST_TOOLS_EXTENSION_PATH = "piwork/extensions/host-tools.mjs";
 
@@ -17,17 +19,17 @@ export const HOST_TOOLS_EXTENSION_PATH = "piwork/extensions/host-tools.mjs";
  * egress control) joins here later. */
 export type HostToolsBridgeName =
   | "create_scheduled_task"
+  | "image_gen"
   | "platform_web_search";
 
-export const HOST_TOOLS_BRIDGEABLE: ReadonlySet<HostToolsBridgeName> = new Set([
-  "create_scheduled_task",
-  "platform_web_search",
-]);
+export const HOST_TOOLS_BRIDGEABLE: ReadonlySet<keyof typeof DEFINITIONS> =
+  new Set(["create_scheduled_task", "platform_web_search"]);
 
 /** Outer timeouts must exceed the host-side inner timeouts (create task: DB
  * fast; search: MCP 30s inner → 60s outer leaves error-return headroom). */
 const HOST_TOOLS_TIMEOUT_MS: Record<HostToolsBridgeName, number> = {
   create_scheduled_task: 30_000,
+  image_gen: 180_000,
   platform_web_search: 60_000,
 };
 
@@ -106,13 +108,14 @@ const PLATFORM_WEB_SEARCH_DEFINITION = {
   },
 } as const;
 
-const DEFINITIONS: Record<HostToolsBridgeName, unknown> = {
+const DEFINITIONS = {
   create_scheduled_task: CREATE_SCHEDULED_TASK_DEFINITION,
   platform_web_search: PLATFORM_WEB_SEARCH_DEFINITION,
 };
 
 export function hostToolsExtensionSource(options: {
-  tools: readonly HostToolsBridgeName[];
+  tools: readonly (keyof typeof DEFINITIONS)[];
+  imageTool?: Pick<AgentTool, "description" | "label" | "name" | "parameters">;
   /** When the bridge cannot reach the host (e.g. no PIWORK_INFERENCE_URL),
    * tools still register but fail with this honest message — the chat keeps
    * running and never falls back to host execution. */
@@ -120,7 +123,10 @@ export function hostToolsExtensionSource(options: {
 }): string {
   const config = JSON.stringify({
     timeouts: HOST_TOOLS_TIMEOUT_MS,
-    tools: options.tools.map((name) => DEFINITIONS[name]),
+    tools: [
+      ...options.tools.map((name) => DEFINITIONS[name]),
+      ...(options.imageTool ? [options.imageTool] : []),
+    ],
     unavailableReason: options.unavailableReason ?? null,
   });
   return `const CONFIG = ${config};

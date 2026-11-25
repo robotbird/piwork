@@ -54,6 +54,32 @@ test("valid preferences survive and stale IDs resolve to the displayed default",
   );
 });
 
+test("legacy image preferences resolve to the available default image model", () => {
+  const defaultImageModelId = "piwork/image-gen/qwen-image-3.0";
+  const anotherImageId = "piwork/image-gen/wan2.7-image";
+  const imageCatalog = {
+    ...catalog,
+    defaultImageModelId,
+    models: [
+      ...catalog.models,
+      { id: defaultImageModelId },
+      { id: anotherImageId },
+    ],
+  };
+  assert.equal(
+    resolveChatModelId(imageCatalog, "piwork/image-gen"),
+    defaultImageModelId
+  );
+  assert.equal(
+    resolveChatModelId(imageCatalog, anotherImageId),
+    anotherImageId
+  );
+  assert.equal(
+    resolveChatModelId({ ...catalog, defaultImageModelId }, "piwork/image-gen"),
+    catalog.defaultModelId
+  );
+});
+
 test("model authorization errors do not claim another user's chat", async () => {
   const error = new ChatbotError("forbidden:model", "Model not authorized");
   const response = error.toResponse("en");

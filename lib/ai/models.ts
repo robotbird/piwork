@@ -1,6 +1,9 @@
 /** 聊天初始选中值：仅在接口返回前占位，实际模型以模型管理平台目录为准 */
 export const DEFAULT_CHAT_MODEL = "deepseek/deepseek-flash";
 
+export const AUTO_VIRTUAL_MODEL_ID = "piwork/auto";
+export const IMAGE_VIRTUAL_MODEL_ID = "piwork/image-gen";
+
 /** artifacts（AI SDK 网关路径）仍引用的标题模型配置 */
 export const titleModel = {
   description: "Fast model for title generation",
@@ -17,6 +20,7 @@ export type ModelCapabilities = {
 
 export type ChatModel = {
   id: string;
+  imageModelId?: string;
   name: string;
   provider: string;
   description: string;

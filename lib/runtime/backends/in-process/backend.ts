@@ -64,6 +64,7 @@ export class InProcessBackend implements RuntimeBackend {
         ? [
             createImageGenTool({
               cwd: process.cwd(),
+              imageModelId: spec.imageModelId,
               // 每张图直接作为附件卡片（artifact.created）交付；markdown
               // 渲染器不放行相对路径图片 URL，卡片是图像的展示形态
               onDelivered: (file) => {

@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ModelRouteRequest } from "@earendil-works/pi-coding-agent";
+import { AUTO_VIRTUAL_MODEL_ID } from "../../../lib/ai/models.ts";
 import {
-  AUTO_VIRTUAL_MODEL_ID,
   autoVirtualCatalogModel,
   autoVirtualModelDefinition,
   buildVirtualCatalogModel,

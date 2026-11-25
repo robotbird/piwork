@@ -22,7 +22,11 @@ import { entitlementsByUserType } from "@/lib/ai/entitlements";
 import { classifyExecution } from "@/lib/ai/execution-classifier";
 import { getImageGenerationSetup } from "@/lib/ai/image-generation";
 import { loadEnabledManagedProjectSkills } from "@/lib/ai/managed-skills";
-import { getModelAvailability } from "@/lib/ai/models";
+import {
+  AUTO_VIRTUAL_MODEL_ID,
+  getModelAvailability,
+  IMAGE_VIRTUAL_MODEL_ID,
+} from "@/lib/ai/models";
 import { getPiModel, toPiHistoryMessages } from "@/lib/ai/pi";
 import { type RequestHints, systemPrompt } from "@/lib/ai/prompts";
 import { checkUserTokenQuota, getUserModelCatalog } from "@/lib/ai/role-access";
@@ -165,16 +169,20 @@ export async function POST(request: Request) {
       }
       return Response.json({ error: t("noModelConfigured") }, { status: 503 });
     }
-    const activeModelIds = new Set(
-      modelCatalog.models.map((model) => model.id)
+    const requestedModelId =
+      selectedChatModel === IMAGE_VIRTUAL_MODEL_ID
+        ? modelCatalog.defaultImageModelId
+        : selectedChatModel;
+    const modelConfig = modelCatalog.models.find(
+      (model) => model.id === requestedModelId
     );
-    if (!activeModelIds.has(selectedChatModel)) {
+    if (!modelConfig) {
       return new ChatbotError(
         "forbidden:model",
         "Model not authorized"
       ).toResponse();
     }
-    const chatModel = selectedChatModel;
+    const { id: chatModel, imageModelId } = modelConfig;
 
     const userType: UserType = session.user.type;
 
@@ -308,7 +316,6 @@ export async function POST(request: Request) {
       longitude,
     };
 
-    const modelConfig = modelCatalog.models.find((m) => m.id === chatModel);
     const currentUserMessageIndex = uiMessages.findLastIndex(
       (currentMessage) => currentMessage.role === "user"
     );
@@ -431,13 +438,12 @@ export async function POST(request: Request) {
     // 受限角色不得被路由到未授权模型。
     const imageGeneration = await getImageGenerationSetup();
     const virtualSelected = piModel.provider === "piwork";
-    const autoVirtualSelected = virtualSelected && piModel.id === "auto";
-    const imageVirtualSelected = virtualSelected && piModel.id === "image-gen";
-    if (imageVirtualSelected && !imageGeneration) {
-      return Response.json(
-        { error: "图像生成未配置：需要在管理端安装通义插件并启用图像模型" },
-        { status: 400 }
-      );
+    const autoVirtualSelected = chatModel === AUTO_VIRTUAL_MODEL_ID;
+    if (
+      imageModelId &&
+      !imageGeneration?.models.some((model) => model.modelId === imageModelId)
+    ) {
+      return Response.json({ error: t("modelUnavailable") }, { status: 400 });
     }
     const physicalCatalogModels = modelCatalog.models.filter(
       (model) => model.provider !== "piwork"
@@ -449,15 +455,18 @@ export async function POST(request: Request) {
     if (virtualSelected) {
       const fastId =
         physicalCatalogModels.find((model) => model.capabilities.tools)?.id ??
-        getPreferredModelId(modelCatalog) ??
-        chatModel;
-      virtualOrchestrator = await getPiModel(fastId).catch(() => undefined);
+        (autoVirtualSelected ? getPreferredModelId(modelCatalog) : null);
+      virtualOrchestrator = fastId
+        ? await getPiModel(fastId).catch(() => undefined)
+        : undefined;
       if (!virtualOrchestrator) {
         return Response.json(
           {
-            error: autoVirtualSelected
-              ? "Auto 模式需要至少一个可用的对话模型"
-              : "图像生成模式需要至少一个可用的对话模型",
+            error: t(
+              autoVirtualSelected
+                ? "autoModelNeedsChatModel"
+                : "imageModelNeedsChatModel"
+            ),
           },
           { status: 400 }
         );
@@ -632,7 +641,7 @@ export async function POST(request: Request) {
       execute: async ({ writer: dataStream }) => {
         let leaseTransferred = false;
         try {
-          const modelName = modelConfig?.name ?? chatModel;
+          const modelName = modelConfig.name;
           let hasModelActivity = false;
           let healthCheckTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -723,6 +732,7 @@ export async function POST(request: Request) {
                 hostTools: { idempotencyKey: currentUserMessage.id },
                 // image_gen 由 backend 注入（artifact 卡片闭包），此处只声明可用性
                 imageGeneration: Boolean(imageGeneration),
+                imageModelId,
                 // 沙箱路由矩阵下虚拟模型 pin 成物理编排模型：沙箱内 Pi 无
                 // 会话侧路由注册（fail-closed，不降级），此处显式固定
                 model:

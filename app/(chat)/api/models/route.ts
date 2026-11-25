@@ -16,6 +16,7 @@ export async function GET() {
         capabilities: Object.fromEntries(
           catalog.models.map((model) => [model.id, model.capabilities])
         ),
+        defaultImageModelId: catalog.defaultImageModelId,
         defaultModelId: catalog.defaultModelId,
         models: catalog.models,
       },

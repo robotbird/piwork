@@ -26,7 +26,10 @@ import { isTestEnvironment } from "../constants";
 import { agentToolToToolDefinition } from "./agent-tools";
 import { imageGenVirtualModelDefinition } from "./image-generation";
 import { getActivePiProviders } from "./pi";
-import { autoVirtualModelDefinition } from "./virtual-models";
+import {
+  autoVirtualModelDefinition,
+  VIRTUAL_MODEL_PROVIDER,
+} from "./virtual-models";
 
 // e2e 环境未播种 .piwork/pi-agent:PI_OFFLINE 阻止 loader 网络安装,
 // 聊天照常工作(无 mcp 工具),保证测试确定性。
@@ -111,11 +114,19 @@ export async function createPiworkAgentSession(
   const modelRuntime = await ModelRuntime.create({
     credentials: createPluginCredentialStore(),
   });
-  // 「图像生成」虚拟模型（Pi virtual model）：选中时按请求路由到编排 LLM，
-  // 出图由 image_gen 平台工具完成。始终注册（未选中时零开销）。
-  modelRuntime.registerVirtualModel(
-    imageGenVirtualModelDefinition(() => options.virtualOrchestrator)
-  );
+  if (
+    options.model.provider === VIRTUAL_MODEL_PROVIDER &&
+    !options.autoVirtualRouting &&
+    options.virtualOrchestrator
+  ) {
+    const { id, name } = options.model;
+    modelRuntime.registerVirtualModel(
+      imageGenVirtualModelDefinition(() => options.virtualOrchestrator, {
+        id,
+        name,
+      })
+    );
+  }
   // 「Auto 智能路由」虚拟模型：按提示词在 fast/quality 物理模型间路由；
   // 候选由 chat route 从用户授权目录解析（未提供 = 不注册，目录侧同步不展示）
   if (options.autoVirtualRouting) {

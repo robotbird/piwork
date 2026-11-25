@@ -16,15 +16,15 @@ import {
 } from "@/lib/ai/active-models";
 import {
   IMAGE_GENERATION_PROVIDER_ID,
-  IMAGE_VIRTUAL_MODEL_ID,
   imageGenVirtualCatalogModel,
   resolveImageGenerationProviderSetup,
 } from "@/lib/ai/image-generation";
-import { chatModels } from "@/lib/ai/models";
 import {
   AUTO_VIRTUAL_MODEL_ID,
-  autoVirtualCatalogModel,
-} from "@/lib/ai/virtual-models";
+  chatModels,
+  IMAGE_VIRTUAL_MODEL_ID,
+} from "@/lib/ai/models";
+import { autoVirtualCatalogModel } from "@/lib/ai/virtual-models";
 import { loadPluginInstallations } from "@/lib/model-plugins/registry";
 import type { ChatMessage } from "@/lib/types";
 import { getTextFromMessage } from "@/lib/utils";
@@ -194,8 +194,15 @@ export async function getPiModel(modelId: string) {
   if (modelId === AUTO_VIRTUAL_MODEL_ID) {
     return autoVirtualCatalogModel();
   }
-  if (modelId === IMAGE_VIRTUAL_MODEL_ID) {
-    return imageGenVirtualCatalogModel();
+  if (modelId.startsWith(`${IMAGE_VIRTUAL_MODEL_ID}/`)) {
+    const catalog = await getActiveModelCatalog();
+    const entry = catalog.models.find((item) => item.id === modelId);
+    if (entry?.imageModelId) {
+      return imageGenVirtualCatalogModel({
+        id: splitModelId(modelId).model,
+        name: entry.name,
+      });
+    }
   }
   await ensurePiProviders();
   const { model, provider } = splitModelId(modelId);
@@ -214,12 +221,14 @@ export async function generateChatImage({
   modelId,
   prompt,
   n,
+  references,
   signal,
   size,
 }: {
   modelId: string;
   prompt: string;
   n?: number;
+  references?: { data: string; mimeType: string }[];
   signal?: AbortSignal;
   size?: string;
 }): Promise<AssistantImages> {
@@ -230,7 +239,15 @@ export async function generateChatImage({
   }
   return piModels.generateImages(
     model,
-    { input: [{ text: prompt, type: "text" }] },
+    {
+      input: [
+        ...(references ?? []).map((image) => ({
+          ...image,
+          type: "image" as const,
+        })),
+        { text: prompt, type: "text" },
+      ],
+    },
     {
       ...(n === undefined ? {} : { n }),
       ...(size ? { size } : {}),

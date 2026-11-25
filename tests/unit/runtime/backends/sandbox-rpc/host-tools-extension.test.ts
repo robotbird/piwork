@@ -1,6 +1,7 @@
 import "../../../../support/runtime-env";
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createImageGenTool } from "@/lib/ai/image-tools";
 import {
   HOST_TOOLS_BRIDGEABLE,
   hostToolsExtensionSource,
@@ -127,14 +128,17 @@ type Bridge = {
   url: string;
 };
 
-async function bootBridge(impl: HostTool): Promise<Bridge> {
+async function bootBridge(
+  impl: HostTool,
+  name = "create_scheduled_task"
+): Promise<Bridge> {
   const tokens = new RunTokenRegistry();
   const { token } = tokens.mint({
     chatId: "00000000-0000-0000-0000-0000000000cc",
     grants: [{ model: "m", provider: "p" }],
     hostTools: {
       idempotencyKey: "message-1",
-      tools: ["create_scheduled_task"],
+      tools: [name],
       userId: USER_ID,
     },
     runId: "run-ext-1",
@@ -142,7 +146,7 @@ async function bootBridge(impl: HostTool): Promise<Bridge> {
   const server = new InferenceProxyServer({
     hostTools: createHostToolsHandler({
       tokens,
-      tools: { create_scheduled_task: impl },
+      tools: { [name]: impl },
     }),
     resolver: () => null,
     tokens,
@@ -200,6 +204,42 @@ test("loopback：宿主结果同步回流为工具内容", async () => {
         { id: "task-9", title: "报告" }
       );
     });
+  } finally {
+    await bridge.close();
+  }
+});
+
+test("the selected image tool crosses the bridge with its pinned schema", async () => {
+  const { description, label, name, parameters } = createImageGenTool({
+    allowReferences: false,
+    imageModelId: "wan2.7-image",
+  });
+  const { registered } = await loadExtension(
+    hostToolsExtensionSource({
+      imageTool: { description, label, name, parameters },
+      tools: [],
+    })
+  );
+  assert.equal(registered.length, 1);
+  assert.equal(registered[0].name, "image_gen");
+  const properties = registered[0].parameters.properties as object;
+  assert.equal("model" in properties, false);
+  assert.equal("references" in properties, false);
+  const bridge = await bootBridge(
+    ({ input }) =>
+      Promise.resolve({
+        content: [{ text: JSON.stringify(input), type: "text" }],
+      }),
+    name
+  );
+  try {
+    const input = { prompt: "A mountain lake" };
+    const result = await withBridgeEnv(bridge, () =>
+      registered[0].execute("image-call", input)
+    );
+    assert.deepEqual(result.content, [
+      { text: JSON.stringify(input), type: "text" },
+    ]);
   } finally {
     await bridge.close();
   }

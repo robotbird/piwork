@@ -3,10 +3,15 @@ import "server-only";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { ToolCall } from "@earendil-works/pi-ai";
+import { validateToolArguments } from "@earendil-works/pi-ai/utils/validation";
 import type { RpcClientOptions } from "@earendil-works/pi-coding-agent";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
+import { createImageGenTool } from "@/lib/ai/image-tools";
 import {
   buildSandboxModelsJson,
+  type HostTool,
+  HostToolsError,
   RUN_TOKEN_ENV,
   type RunHostToolsGrant,
   sandboxModelEntryFromModel,
@@ -119,6 +124,7 @@ export type SandboxRpcBackendOptions = {
 };
 
 export type SandboxInferenceOptions = {
+  registerImageTool?: (runId: string, tool: HostTool) => void;
   /** 沙箱视角可达的 proxy 地址（如 http://host.docker.internal:3210） */
   proxyUrl: string;
   /** 装配级附加 FQDN 基线（管理员控制；proxy 主机恒在基线内） */
@@ -222,12 +228,24 @@ export class SandboxRpcBackend implements RuntimeBackend {
       ...new Set(
         spec.tools
           .map((tool) => tool.name)
-          .filter((name): name is HostToolsBridgeName =>
-            HOST_TOOLS_BRIDGEABLE.has(name as HostToolsBridgeName)
+          .filter((name): name is Exclude<HostToolsBridgeName, "image_gen"> =>
+            HOST_TOOLS_BRIDGEABLE.has(
+              name as Exclude<HostToolsBridgeName, "image_gen">
+            )
           )
       ),
     ];
-    const hostToolsScope = this.resolveHostToolsScope(spec, bridgedTools);
+    const hostToolsScope = this.resolveHostToolsScope(
+      spec,
+      spec.imageModelId ? [...bridgedTools, "image_gen"] : bridgedTools
+    );
+    const { inference } = this.options;
+    if (
+      spec.imageModelId &&
+      !(hostToolsScope && inference?.registerImageTool)
+    ) {
+      throw new Error("runtime:sandbox:image-generation-bridge-unavailable");
+    }
     const resource = sandboxResourceSchema.parse(
       this.options.resourcePolicy
         ? await this.options.resourcePolicy()
@@ -241,7 +259,6 @@ export class SandboxRpcBackend implements RuntimeBackend {
         })
       : [];
     const queue = new AsyncEventQueue<RuntimeEvent>();
-    const { inference } = this.options;
     const runId = spec.runId ?? globalThis.crypto.randomUUID();
     // token 先于沙箱签发：mint 失败（如 run 未授权模型）直接失败，不留
     // 无凭据沙箱；真实 provider 凭据永不进沙箱（proxy 侧独占）
@@ -341,7 +358,50 @@ export class SandboxRpcBackend implements RuntimeBackend {
       }
       // Host Tools Bridge 沙箱侧：闭包工具按名映射为显式扩展。缺配置时
       // 工具仍注册但以明确的"能力不可用"失败——聊天继续，不回退宿主执行。
-      if (bridgedTools.length > 0) {
+      const imageTool = spec.imageModelId
+        ? createImageGenTool({
+            allowReferences: false,
+            imageModelId: spec.imageModelId,
+            onDelivered: (file) =>
+              queue.push({ file, type: "artifact.created" }),
+            onStored: (file, size) =>
+              this.options.archiveFile?.(spec.chatId, file, size) ??
+              Promise.resolve(),
+          })
+        : undefined;
+      if (imageTool) {
+        inference?.registerImageTool?.(runId, async ({ input, signal }) => {
+          if (!input || typeof input !== "object" || Array.isArray(input)) {
+            throw new HostToolsError(
+              "invalid_input",
+              "Invalid image generation input."
+            );
+          }
+          const id = globalThis.crypto.randomUUID();
+          let params: unknown;
+          try {
+            params = validateToolArguments(imageTool, {
+              arguments: input as ToolCall["arguments"],
+              id,
+              name: imageTool.name,
+              type: "toolCall",
+            });
+          } catch (error) {
+            // biome-ignore lint/style/useErrorCause: HostToolsError receives ErrorOptions as its third argument.
+            throw new HostToolsError(
+              "invalid_input",
+              "Invalid image generation input.",
+              { cause: error }
+            );
+          }
+          const result = await imageTool.execute(id, params, signal);
+          return {
+            content: result.content.filter((block) => block.type === "text"),
+            details: result.details,
+          };
+        });
+      }
+      if (bridgedTools.length > 0 || imageTool) {
         const hostToolsReachable = Boolean(hostToolsScope && inference);
         const unavailableReason = hostToolsReachable
           ? undefined
@@ -363,6 +423,16 @@ export class SandboxRpcBackend implements RuntimeBackend {
           new TextEncoder().encode(
             hostToolsExtensionSource({
               tools: bridgedTools,
+              ...(imageTool
+                ? {
+                    imageTool: {
+                      description: imageTool.description,
+                      label: imageTool.label,
+                      name: imageTool.name,
+                      parameters: imageTool.parameters,
+                    },
+                  }
+                : {}),
               ...(unavailableReason ? { unavailableReason } : {}),
             })
           )

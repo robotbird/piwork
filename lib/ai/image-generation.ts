@@ -35,9 +35,8 @@ import {
  * `Models.generateImages`。凭据始终留在服务进程（复用插件安装的加密凭据），
  * 不进入聊天工作区。
  *
- * 同时定义「图像生成」虚拟模型（Pi virtual model）：选中它时每次请求经
- * `route()` 派给一个物理编排 LLM，编排模型通过 image_gen 工具完成出图；
- * 用户无需切回普通模型即可继续对话。
+ * Each selectable image model uses a Pi virtual model to route to a chat
+ * orchestrator. The image_gen tool is pinned to the selected image model.
  */
 
 /** 自定义 ImageApi id（pi-ai 允许字符串扩展名；KnownImageApi 只有 openrouter） */
@@ -46,11 +45,7 @@ export const DASHSCOPE_IMAGES_API = "dashscope-images";
 /** 宿主侧图像生成 Provider 在 Models registry 中的 id */
 export const IMAGE_GENERATION_PROVIDER_ID = "piwork-images";
 
-/** 虚拟模型（图像生成模式）完整 id：聊天目录 / getPiModel 均用该值 */
-export const IMAGE_VIRTUAL_MODEL_ID = "piwork/image-gen";
-
 const IMAGE_VIRTUAL_PROVIDER = VIRTUAL_MODEL_PROVIDER;
-const IMAGE_VIRTUAL_MODEL_NAME = "image-gen";
 
 /** 默认出图模型：千问图像 3.0（同步端点、0.18 元/张） */
 export const DEFAULT_IMAGE_MODEL_ID = "qwen-image-3.0";
@@ -62,6 +57,7 @@ export { MAX_IMAGES_PER_CALL };
 export type ImageGenerationModelInfo = {
   modelId: string;
   name: string;
+  vision?: boolean;
   /** 每张输出价格（plugin 目录定价，货币见 currency） */
   pricePerImage?: number;
   currency?: string;
@@ -70,6 +66,7 @@ export type ImageGenerationModelInfo = {
 export type ImageGenerationInfo = {
   defaultModelId: string;
   models: ImageGenerationModelInfo[];
+  providerKey: string;
   providerName: string;
 };
 
@@ -88,6 +85,7 @@ function toModelInfo(
     modelId: definition.modelId,
     name: pickLocalizedText(definition.label) || definition.modelId,
     pricePerImage: definition.pricing?.output,
+    vision: definition.features.vision,
   };
 }
 
@@ -154,6 +152,7 @@ export async function getImageGenerationSetup(): Promise<ImageGenerationSetup | 
       toImageModel(IMAGE_GENERATION_PROVIDER_ID, definition, baseUrl)
     ),
     models: definitions.map(toModelInfo),
+    providerKey: tongyi.providerKey,
     providerName,
   };
 }
@@ -167,6 +166,7 @@ export async function getImageGenerationInfo(): Promise<ImageGenerationInfo | nu
   return {
     defaultModelId: setup.defaultModelId,
     models: setup.models,
+    providerKey: setup.providerKey,
     providerName: setup.providerName,
   };
 }
@@ -182,7 +182,7 @@ export function toImageModel(
     baseUrl,
     cost: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0 },
     id: definition.modelId,
-    input: ["text"],
+    input: definition.features.vision ? ["text", "image"] : ["text"],
     name: pickLocalizedText(definition.label) || definition.modelId,
     output: ["image"],
     provider,
@@ -244,7 +244,9 @@ function nativeOrigin(baseUrl: string): string {
  * （同步模式，无 X-DashScope-Async；compatible-mode 无 /images/generations
  * 路由，实测 404）。请求形状为对话式 `input.messages`（qwen-image、
  * z-image、wan2.5+ 统一）；旧 wanx2.0/v1 与可灵/Vidu 走各自异步端点，
- * 本通道未接——错误原样透传。v1 只接受文本 prompt（图生图待接入）。
+ * 本通道未接——错误原样透传。context.input 里的 image part 作为参考图
+ * 进入 content（`[{image},{text}]` 形状，实测 qwen-image-3.0 图生图 200），
+ * 仅同步生图；任务式（异步）模型返回明确错误并建议改用同步模型。
  */
 export function createDashScopeImagesFunction({
   apiKey,
@@ -274,12 +276,18 @@ export function createDashScopeImagesFunction({
       if (!prompt) {
         return imagesError(model, "image_gen: prompt is required");
       }
-      if (context.input.some((part) => part.type === "image")) {
-        return imagesError(
-          model,
-          "image_gen: image input (图生图/局部重绘) 尚未接入，当前仅支持文生图；编辑类需求请先用图像处理 skill 的本地能力"
-        );
-      }
+      // 参考图在前、指令在后（图生图/风格派生：保主体换风格等）
+      const content = [
+        ...context.input
+          .filter(
+            (part): part is Extract<typeof part, { type: "image" }> =>
+              part.type === "image"
+          )
+          .map((part) => ({
+            image: `data:${part.mimeType};base64,${part.data}`,
+          })),
+        { text: prompt },
+      ];
       const count =
         typeof extra.n === "number" && extra.n >= 1
           ? Math.min(Math.floor(extra.n), MAX_IMAGES_PER_CALL)
@@ -289,7 +297,7 @@ export function createDashScopeImagesFunction({
         typeof extra.size === "string" && extra.size ? extra.size : "1024*1024";
       const body = {
         input: {
-          messages: [{ content: [{ text: prompt }], role: "user" }],
+          messages: [{ content, role: "user" }],
         },
         model: model.id,
         parameters: { n: count, size },
@@ -398,13 +406,16 @@ export function buildImageGenerationProvider(setup: {
 }
 
 /**
- * 「图像生成」虚拟模型目录条目。等价于 Pi 的 `createVirtualModel`——该函数
+ * 图像模型对应的虚拟模型目录条目。等价于 Pi 的 `createVirtualModel`——该函数
  * 未从 pi-coding-agent 包根导出，按官方 `VIRTUAL_MODEL_API` 语义手工构造。
  */
-export function imageGenVirtualCatalogModel(): Model<Api> {
+export function imageGenVirtualCatalogModel({
+  id,
+  name,
+}: Pick<Model<Api>, "id" | "name">): Model<Api> {
   return buildVirtualCatalogModel({
-    id: IMAGE_VIRTUAL_MODEL_NAME,
-    name: "图像生成",
+    id,
+    name,
     provider: IMAGE_VIRTUAL_PROVIDER,
     thinkingLevels: ["low", "medium", "high"],
   });
@@ -416,11 +427,12 @@ export function imageGenVirtualCatalogModel(): Model<Api> {
  * 粘住最近成功（或失败待重试）的物理模型，保住 prompt cache。
  */
 export function imageGenVirtualModelDefinition(
-  resolveOrchestrator: () => Model<Api> | undefined
+  resolveOrchestrator: () => Model<Api> | undefined,
+  { id, name }: Pick<Model<Api>, "id" | "name">
 ): VirtualModelDefinition {
   return {
-    id: IMAGE_VIRTUAL_MODEL_NAME,
-    name: "图像生成",
+    id,
+    name,
     provider: IMAGE_VIRTUAL_PROVIDER,
     route(request) {
       // thinkingLevel 透传（官方示例模式）：由运行时按物理模型 clamp，
