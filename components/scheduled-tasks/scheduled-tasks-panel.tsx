@@ -11,7 +11,6 @@ import {
   LibraryBig,
   Lightbulb,
   Loader2,
-  Mic,
   MoreHorizontal,
   Newspaper,
   Paperclip,
@@ -467,7 +466,7 @@ export function ScheduledTasksPanel() {
         />
         <form
           className={cn(
-            "composer-plain grid min-h-14 grid-cols-[30px_minmax(0,1fr)_30px_30px] items-center gap-x-2 border border-[var(--hairline-strong)] bg-card px-2 py-[7px] shadow-[var(--shadow-whisper)]",
+            "composer-plain grid min-h-14 grid-cols-[30px_minmax(0,1fr)_30px] items-center gap-x-2 border border-[var(--hairline-strong)] bg-card px-2 py-[7px] shadow-[var(--shadow-whisper)]",
             multiline ? "gap-y-2 rounded-[28px]" : "rounded-full"
           )}
           onSubmit={(event) => {
@@ -536,7 +535,7 @@ export function ScheduledTasksPanel() {
             className={cn(
               "min-w-0 w-full resize-none overflow-x-hidden whitespace-pre-wrap break-words bg-transparent py-2 text-base leading-6 outline-none placeholder:text-muted-foreground",
               multiline
-                ? "col-span-4 col-start-1 row-start-1 px-3"
+                ? "col-span-3 col-start-1 row-start-1 px-3"
                 : "col-start-2 row-start-2"
             )}
             maxLength={2000}
@@ -563,23 +562,8 @@ export function ScheduledTasksPanel() {
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                aria-label={t("scheduledTasks.voice")}
-                className="col-start-3 row-start-2 size-[30px] shrink-0 rounded-full text-foreground transition-colors duration-150 hover:bg-muted"
-                onClick={() => toast.info(t("scheduledTasks.voiceSoon"))}
-                size="icon"
-                type="button"
-                variant="ghost"
-              >
-                <Mic className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("scheduledTasks.voice")}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
                 aria-label={t("scheduledTasks.scheduleWithAI")}
-                className="col-start-4 row-start-2 size-[30px] shrink-0 rounded-full"
+                className="col-start-3 row-start-2 size-[30px] shrink-0 rounded-full"
                 disabled={
                   !query.trim() || uploadQueue.length > 0 || librarySelecting
                 }
