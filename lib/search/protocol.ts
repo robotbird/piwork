@@ -20,7 +20,10 @@ export type SearchSource = {
   snippet: string;
 };
 export type SearchResult = SearchSource & { snippet: string };
-export type SearchResponse = { provider: "tavily"; results: SearchResult[] };
+export type SearchResponse = {
+  provider: "tavily" | "deepseek";
+  results: SearchResult[];
+};
 
 /** Rich source metadata carried by the `data-web-source` UI message part. */
 export type WebSourceData = {
@@ -214,7 +217,9 @@ function pluginSearchSources(result: unknown): SearchSource[] {
           : []) {
           const url = publicSourceUrl(item.url);
           const title =
-            typeof item.title === "string" ? item.title.trim().slice(0, 250) : "";
+            typeof item.title === "string"
+              ? item.title.trim().slice(0, 250)
+              : "";
           if (!url || !title || seen.has(url)) {
             continue;
           }

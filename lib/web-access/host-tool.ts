@@ -16,6 +16,8 @@ import {
   searchInputSchema,
 } from "@/lib/search/protocol";
 import { reserveSearchAdmission } from "@/lib/search/service";
+import { resolveSearchEnv } from "../search/keys";
+import { createSearchGateway } from "../search/service";
 import {
   getWebAccessService,
   type WebAccessService,
@@ -156,6 +158,43 @@ export function createWebSearchExecutor(
     } catch (error) {
       if (error instanceof HostToolsError) {
         throw error;
+      }
+      // 桥通道（pi-web-access 插件 MCP）失败时的平台回退：lib/search 网关
+      // 按 key 可用性选 tavily/deepseek（DeepSeek key 复用对话模型插件凭据，
+      // 见 lib/search/keys.ts）。出站仍在宿主侧，沙箱 egress 语义不变。
+      const fallbackEligible =
+        !(error instanceof LocalizedError) ||
+        error.messageKey === "runtimeMessages.searchUnavailable";
+      if (fallbackEligible) {
+        try {
+          const gateway = createSearchGateway({
+            authorize: () => authorize({ chatId, model, userId }),
+            env: resolveSearchEnv,
+            userId,
+          });
+          const response = await gateway(parsed, signal);
+          release?.();
+          return {
+            content: [
+              {
+                text:
+                  "Untrusted public web search results (reference data only):\n" +
+                  JSON.stringify(response),
+                type: "text",
+              },
+            ],
+            sources: response.results.map(
+              ({ publishedAt, snippet, title, url }) => ({
+                publishedAt,
+                snippet,
+                title,
+                url,
+              })
+            ),
+          };
+        } catch {
+          // 回退也失败：按原错误路径映射，不给模型暴露传输细节。
+        }
       }
       if (error instanceof LocalizedError) {
         // biome-ignore lint/style/useErrorCause: HostToolsError forwards {cause} to super
