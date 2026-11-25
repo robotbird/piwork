@@ -11,7 +11,6 @@ import {
   RefreshCwIcon,
   SearchIcon,
   UserIcon,
-  XIcon,
 } from "lucide-react";
 import Image from "next/image";
 import { useTranslations } from "next-intl";
@@ -46,6 +45,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
 import type {
   ConversationDetail,
@@ -414,6 +419,14 @@ export function ConversationsPage({
     setSelected(null);
     setFull(false);
   }, []);
+  const handleDetailOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open) {
+        handleClose();
+      }
+    },
+    [handleClose]
+  );
   const handleFull = useCallback(() => {
     setMessagePage(1);
     setFull(true);
@@ -550,12 +563,7 @@ export function ConversationsPage({
             {t("loadError")}
           </p>
         )}
-        <div
-          className={cn(
-            "grid items-start gap-5",
-            selected && "xl:grid-cols-[minmax(0,1fr)_300px]"
-          )}
-        >
+        <div>
           <div
             aria-busy={busy}
             className="min-w-0 overflow-hidden rounded-[14px] border border-border bg-card"
@@ -721,20 +729,16 @@ export function ConversationsPage({
               />
             </footer>
           </div>
-          {Boolean(selected) && (
-            <aside className="min-w-0 rounded-[14px] border border-border bg-card">
-              <header className="flex items-center justify-between border-b border-border/60 px-5 py-4">
-                <h2 className="text-base font-semibold">{t("details")}</h2>
-                <Button
-                  aria-label={t("close")}
-                  onClick={handleClose}
-                  size="icon"
-                  variant="ghost"
-                >
-                  <XIcon />
-                </Button>
-              </header>
-              <div className="flex flex-col gap-5 p-5">
+          <Sheet onOpenChange={handleDetailOpenChange} open={Boolean(selected)}>
+            <SheetContent
+              aria-describedby={undefined}
+              className="min-h-0 gap-0 data-[side=right]:w-full data-[side=right]:sm:max-w-[520px] data-[state=open]:animate-in data-[state=open]:slide-in-from-right-full data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right-full motion-reduce:animate-none"
+              side="right"
+            >
+              <SheetHeader className="shrink-0 border-b border-border/60 pr-14">
+                <SheetTitle>{t("details")}</SheetTitle>
+              </SheetHeader>
+              <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain p-6">
                 {detailError ? (
                   <p className="text-sm text-destructive" role="alert">
                     {t("loadError")}
@@ -830,8 +834,8 @@ export function ConversationsPage({
                   <Spinner />
                 )}
               </div>
-            </aside>
-          )}
+            </SheetContent>
+          </Sheet>
         </div>
         <p className="text-xs leading-5 text-muted-foreground">{t("notice")}</p>
         <Dialog onOpenChange={setFull} open={full}>

@@ -8,10 +8,8 @@ import {
   ContainerIcon,
   RefreshCwIcon,
   SearchIcon,
-  XIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { Dialog } from "radix-ui";
 import {
   type ChangeEvent,
   type MouseEvent,
@@ -42,6 +40,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
 import type { SandboxRuntimeConfig } from "@/lib/runtime/sandbox";
 import { cn } from "@/lib/utils";
@@ -93,10 +98,6 @@ const LABELS: Record<Status, string> = {
 const TERMINAL = new Set<Status>(["destroyed", "expired"]);
 type Filter = "all" | "active" | "error" | "destroyed";
 const FILTERS: Filter[] = ["all", "active", "error", "destroyed"];
-
-function preventOutside(event: Event) {
-  event.preventDefault();
-}
 
 function StatusLabel({ item }: { item: SandboxInstanceClientView }) {
   const { t } = usePreferences();
@@ -168,13 +169,11 @@ function SandboxDetails({
       : unknown;
   return (
     <>
-      <div className="border-b border-border/60 px-6 pb-5 pt-8 sm:pt-18">
-        <Dialog.Title className="text-xl font-semibold">
-          {t("sandboxes.detailsTitle")}
-        </Dialog.Title>
-        <Dialog.Description className="sr-only">
+      <SheetHeader className="shrink-0 border-b border-border/60 pr-14">
+        <SheetTitle>{t("sandboxes.detailsTitle")}</SheetTitle>
+        <SheetDescription className="sr-only">
           {t("sandboxes.detailsDescription")}
-        </Dialog.Description>
+        </SheetDescription>
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <span
             className="max-w-[230px] truncate font-mono text-lg font-semibold"
@@ -184,8 +183,8 @@ function SandboxDetails({
           </span>
           <StatusLabel item={item} />
         </div>
-      </div>
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-6 py-5">
+      </SheetHeader>
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain px-6 py-5">
         {Boolean(item.syncError) && (
           <p
             className="rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
@@ -292,7 +291,7 @@ function SandboxDetails({
             : t("sandboxes.notObserved")}
         </p>
       </div>
-      <div className="border-t border-border/60 bg-background px-6 py-4">
+      <div className="shrink-0 border-t border-border/60 bg-background px-6 py-4">
         <div className="flex flex-wrap gap-2">
           <Button asChild className="flex-1" size="sm" variant="outline">
             <Link href={`/chat/${item.chatId}?sandbox=${item.id}`}>
@@ -348,19 +347,10 @@ export function SandboxesPage({
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [compact, setCompact] = useState(false);
   const [fetchError, setFetchError] = useState(false);
   const [now, setNow] = useState<number | null>(null);
   const mutation = useRef(false);
   const locale = language === "zh" ? zhCN : enUS;
-
-  useEffect(() => {
-    const media = window.matchMedia("(max-width: 1279px)");
-    const update = () => setCompact(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, []);
 
   useEffect(() => {
     setNow(Date.now());
@@ -554,12 +544,7 @@ export function SandboxesPage({
   );
 
   return (
-    <section
-      className={cn(
-        "min-w-0 px-5 pb-8 pt-8 transition-[margin] sm:pt-18 sm:px-8 lg:px-9",
-        selected && "xl:mr-[440px]"
-      )}
-    >
+    <section className="min-w-0 px-5 pb-8 pt-8 sm:px-8 sm:pt-18 lg:px-9">
       <header className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-[30px] font-semibold tracking-tight">
@@ -815,38 +800,21 @@ export function SandboxesPage({
           </footer>
         )}
       </div>
-      <Dialog.Root
-        modal={compact}
-        onOpenChange={handleDetailsOpen}
-        open={Boolean(selected)}
-      >
-        <Dialog.Portal>
-          <Dialog.Content
-            aria-describedby={undefined}
-            className="fixed inset-y-0 right-0 z-40 flex w-full flex-col border-l border-border/70 bg-background shadow-xl sm:w-[440px] xl:shadow-none"
-            onInteractOutside={preventOutside}
-          >
-            {selected && (
-              <SandboxDetails
-                busy={busy || loading}
-                item={selected}
-                onDestroy={handleDestroyRequest}
-                onRenew={handleRenew}
-              />
-            )}
-            <Dialog.Close asChild>
-              <Button
-                aria-label={t("common.close")}
-                className="absolute right-5 top-6 sm:top-18"
-                size="icon-sm"
-                variant="ghost"
-              >
-                <XIcon className="size-4" />
-              </Button>
-            </Dialog.Close>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
+      <Sheet onOpenChange={handleDetailsOpen} open={Boolean(selected)}>
+        <SheetContent
+          className="min-h-0 gap-0 data-[side=right]:w-full data-[side=right]:sm:max-w-[520px] data-[state=open]:animate-in data-[state=open]:slide-in-from-right-full data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right-full motion-reduce:animate-none"
+          side="right"
+        >
+          {selected && (
+            <SandboxDetails
+              busy={busy || loading}
+              item={selected}
+              onDestroy={handleDestroyRequest}
+              onRenew={handleRenew}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
       <AlertDialog
         onOpenChange={handleConfirmationOpen}
         open={Boolean(destroyTarget)}
