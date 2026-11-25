@@ -1,10 +1,15 @@
 import { getLocale, getTranslations } from "next-intl/server";
 import { requireAdminRole } from "@/lib/admin/access";
 import {
+  CUSTOM_MODEL_PACKAGE,
+  customModelApiSchema,
+} from "@/lib/admin/custom-models";
+import {
+  applyModelContextWindows,
   asProviderDefinition,
   mergeCredentialUpdate,
+  modelContextWindowsSchema,
 } from "@/lib/admin/model-plugins";
-import { invalidateActiveModelCatalog } from "@/lib/ai/active-models";
 import {
   deletePluginInstallation,
   getPluginInstallation,
@@ -17,6 +22,7 @@ import {
   encryptPluginCredentials,
   summarizeCredentials,
 } from "@/lib/model-plugins/credentials";
+import { validateCustomCredentials } from "@/lib/model-plugins/custom-provider";
 import { ProviderPluginManager } from "@/lib/model-plugins/manager";
 import {
   pickLocalizedText,
@@ -33,11 +39,6 @@ async function errorResponse(error: unknown, status = 400) {
     { error: error instanceof Error ? error.message : t("operationFailed") },
     { status }
   );
-}
-
-function invalidate() {
-  resetPluginRegistry();
-  invalidateActiveModelCatalog();
 }
 
 export async function PATCH(
@@ -57,6 +58,8 @@ export async function PATCH(
       return errorResponse(new Error(t("pluginInstallationNotFound")), 404);
     }
     const body = (await request.json()) as {
+      contextWindows?: unknown;
+      api?: unknown;
       credentials?: Record<string, unknown>;
       defaultModelId?: string | null;
       enabled?: boolean;
@@ -78,14 +81,51 @@ export async function PATCH(
       packagedPlugin && packagedPlugin.version === record.version
         ? packagedPlugin.definition
         : null;
-    const definition =
-      packagedDefinition ?? asProviderDefinition(record.definition);
+    let definition: ReturnType<typeof asProviderDefinition> = {
+      ...(packagedDefinition ?? asProviderDefinition(record.definition)),
+      contextWindowOverrides: asProviderDefinition(record.definition)
+        .contextWindowOverrides,
+    };
     if (
       packagedDefinition &&
       JSON.stringify(packagedDefinition.models) !==
         JSON.stringify(record.definition.models)
     ) {
       update.definition = packagedDefinition as Record<string, unknown>;
+    }
+    if (body.api !== undefined) {
+      const parsedApi = customModelApiSchema.safeParse(body.api);
+      if (record.packageId !== CUSTOM_MODEL_PACKAGE || !parsedApi.success) {
+        return errorResponse(new Error("modelPlugins.customInvalid"));
+      }
+      definition.api = parsedApi.data;
+      update.definition = definition as Record<string, unknown>;
+    }
+    if (body.contextWindows !== undefined) {
+      const parsed = modelContextWindowsSchema.safeParse(body.contextWindows);
+      if (
+        !parsed.success ||
+        Object.keys(parsed.data).some(
+          (id) =>
+            !definition.models.some(
+              (model) => model.modelId === id && model.modelType === "llm"
+            )
+        )
+      ) {
+        return errorResponse(new Error("modelPlugins.invalidContextWindow"));
+      }
+      definition.contextWindowOverrides = {
+        ...definition.contextWindowOverrides,
+        ...parsed.data,
+      };
+    }
+    definition = applyModelContextWindows(definition);
+    if (
+      packagedDefinition ||
+      body.api !== undefined ||
+      body.contextWindows !== undefined
+    ) {
+      update.definition = definition as Record<string, unknown>;
     }
     const knownIds = new Set(definition.models.map((model) => model.modelId));
     if (body.enabledModels) {
@@ -118,16 +158,11 @@ export async function PATCH(
       }
       update.defaultModelId = body.defaultModelId;
     }
-    if (body.credentials) {
+    if (body.credentials || body.api !== undefined) {
       const pluginPackage = packagedPlugin;
-      if (!pluginPackage) {
+      if (!pluginPackage && record.packageId !== CUSTOM_MODEL_PACKAGE) {
         return errorResponse(new Error(t("pluginPackageNotFound")), 404);
       }
-      const manager = new ProviderPluginManager();
-      const installation = await manager.install(
-        pluginPackage.fileName,
-        pluginPackage.zipBytes
-      );
       let currentCredentials: Record<string, unknown> | null;
       try {
         currentCredentials = decryptPluginCredentials(
@@ -138,7 +173,7 @@ export async function PATCH(
       }
       const nextCredentials = mergeCredentialUpdate(
         currentCredentials,
-        body.credentials,
+        body.credentials ?? {},
         definition.credentialFields
       );
       if (!nextCredentials) {
@@ -161,14 +196,34 @@ export async function PATCH(
           );
         }
       }
-      await manager.validateCredentials(installation, nextCredentials);
+      if (record.packageId === CUSTOM_MODEL_PACKAGE) {
+        const endpoint = String(nextCredentials.endpoint_url ?? "");
+        const url = new URL(endpoint);
+        if (
+          !["http:", "https:"].includes(url.protocol) ||
+          url.username ||
+          url.password ||
+          url.search ||
+          url.hash
+        ) {
+          return errorResponse(new Error("modelPlugins.customInvalid"));
+        }
+        await validateCustomCredentials(definition, nextCredentials);
+      } else if (pluginPackage) {
+        const manager = new ProviderPluginManager();
+        const installation = await manager.install(
+          pluginPackage.fileName,
+          pluginPackage.zipBytes
+        );
+        await manager.validateCredentials(installation, nextCredentials);
+      }
       update.encryptedCredentials = encryptPluginCredentials(nextCredentials);
       update.credentialSummary = summarizeCredentials(nextCredentials);
       update.credentialsConfigured = true;
       update.healthStatus = "healthy";
     }
     await updatePluginInstallation(installationId, update);
-    invalidate();
+    resetPluginRegistry();
     return Response.json({ updated: true });
   } catch (error) {
     return errorResponse(error);
@@ -190,7 +245,7 @@ export async function DELETE(
       return errorResponse(new Error(t("pluginInstallationNotFound")), 404);
     }
     await deletePluginInstallation(installationId);
-    invalidate();
+    resetPluginRegistry();
     return Response.json({ deleted: true });
   } catch (error) {
     return errorResponse(error, 500);

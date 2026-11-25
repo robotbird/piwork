@@ -3,6 +3,7 @@ import type {
   ProviderDefinition,
   ProviderModelDefinition,
 } from "@piwork/model-provider-sdk";
+import { z } from "zod";
 
 export type ModelPluginCatalogItem = {
   defaultBaseUrl?: string;
@@ -18,6 +19,7 @@ export type ModelPluginCatalogItem = {
 };
 
 export type ModelPluginInstallationView = {
+  api?: ProviderDefinition["api"];
   defaultBaseUrl?: string;
   credentialFields: CredentialFieldSchema[];
   credentialSummary: Record<string, string>;
@@ -80,4 +82,33 @@ export function mergeCredentialUpdate(
     return null;
   }
   return { ...(current ?? {}), ...values };
+}
+
+export const modelContextWindowsSchema = z.record(
+  z.string().min(1).max(256),
+  z.number().int().min(1).max(10_000_000)
+);
+
+export function applyModelContextWindows(
+  definition: ProviderDefinition
+): ProviderDefinition {
+  return {
+    ...definition,
+    models: definition.models.map((model) => {
+      const contextSize = definition.contextWindowOverrides?.[model.modelId];
+      return model.modelType === "llm" && contextSize !== undefined
+        ? {
+            ...model,
+            properties: {
+              ...model.properties,
+              contextSize,
+              defaultMaxTokens: Math.min(
+                model.properties.defaultMaxTokens,
+                contextSize
+              ),
+            },
+          }
+        : model;
+    }),
+  };
 }

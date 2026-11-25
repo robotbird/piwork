@@ -1,6 +1,7 @@
 import "server-only";
 
 import {
+  applyModelContextWindows,
   asProviderDefinition,
   type ModelPluginsView,
 } from "@/lib/admin/model-plugins";
@@ -47,18 +48,25 @@ export async function loadModelPluginsView(): Promise<ModelPluginsView> {
           item.packageId === record.packageId && item.version === record.version
       )?.definition;
       return {
+        api: definition.api,
         credentialFields: definition.credentialFields,
         credentialReadable,
         credentialSummary: record.credentialSummary,
         credentialsConfigured: record.credentialsConfigured,
-        defaultBaseUrl: definition.defaultBaseUrl ?? packaged?.defaultBaseUrl,
+        defaultBaseUrl:
+          record.credentialSummary.endpoint_url ||
+          definition.defaultBaseUrl ||
+          packaged?.defaultBaseUrl,
         defaultModelId: record.defaultModelId,
         description: record.description ?? "",
         enabled: record.enabled,
         enabledModels: record.enabledModels,
         healthStatus: record.healthStatus,
         id: record.id,
-        models: packaged?.models ?? definition.models,
+        models: applyModelContextWindows({
+          ...definition,
+          models: packaged?.models ?? definition.models,
+        }).models,
         name: record.displayName,
         packageId: record.packageId,
         providerKey: record.providerKey,

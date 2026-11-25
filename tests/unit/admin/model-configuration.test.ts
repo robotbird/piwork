@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  applyModelContextWindows,
   initialCredentialValues,
   mergeCredentialUpdate,
+  modelContextWindowsSchema,
 } from "../../../lib/admin/model-plugins";
 import {
   definition as deepseek,
@@ -150,5 +152,29 @@ test("credential recovery requires all fields when the old ciphertext is unreada
       [{ variable: "api_key" }, { variable: "api_host" }]
     ),
     { api_host: "custom", api_key: "new" }
+  );
+});
+
+test("context overrides apply to a refreshed packaged catalog and retain image entries", () => {
+  const model = tongyi.models.find((entry) => entry.modelType === "llm");
+  assert.ok(model);
+  const definition = applyModelContextWindows({
+    ...tongyi,
+    contextWindowOverrides: { [model.modelId]: 48_000 },
+  });
+  const configured = definition.models.find(
+    (entry) => entry.modelId === model.modelId
+  );
+  assert.ok(configured?.modelType === "llm");
+  assert.equal(configured.properties.contextSize, 48_000);
+  assert.ok(configured.properties.defaultMaxTokens <= 48_000);
+  assert.deepEqual(
+    definition.models.filter((entry) => entry.modelType === "image"),
+    imageModelCatalog
+  );
+  assert.equal(modelContextWindowsSchema.safeParse({ test: 0 }).success, false);
+  assert.equal(
+    modelContextWindowsSchema.safeParse({ test: 1.5 }).success,
+    false
   );
 });

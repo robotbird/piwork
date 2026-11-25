@@ -1,4 +1,7 @@
-import type { ComponentProps, ReactNode } from "react";
+"use client";
+
+import { type ComponentProps, type ReactNode, useCallback, useState } from "react";
+import { BrainCircuitIcon } from "lucide-react";
 
 import {
   Command,
@@ -180,19 +183,25 @@ export const ModelSelectorLogo = ({
   src,
   className,
   ...props
-}: ModelSelectorLogoProps) => (
-  <img
-    {...props}
-    alt={`${provider} logo`}
-    // className 作为显式尺寸覆盖；未提供时回退到默认 18px（models.dev logo 附加暗色反色）
-    className={cn(
-      className ?? (src ? "size-[18px]" : "size-[18px] dark:invert")
-    )}
-    height={18}
-    src={src ?? `https://models.dev/logos/${provider}.svg`}
-    width={18}
-  />
-);
+}: ModelSelectorLogoProps) => {
+  const source = src ?? `https://models.dev/logos/${provider}.svg`;
+  const [failedSource, setFailedSource] = useState<string | null>(null);
+  const handleError = useCallback(() => setFailedSource(source), [source]);
+  if (provider.startsWith("custom-") || failedSource === source) {
+    return <BrainCircuitIcon aria-hidden="true" className={cn("size-[18px] text-foreground", className)} />;
+  }
+  return (
+    <img
+      {...props}
+      alt={`${provider} logo`}
+      className={cn(className ?? (src ? "size-[18px]" : "size-[18px] dark:invert"))}
+      height={18}
+      onError={handleError}
+      src={source}
+      width={18}
+    />
+  );
+};
 
 export type ModelSelectorLogoGroupProps = ComponentProps<"div">;
 

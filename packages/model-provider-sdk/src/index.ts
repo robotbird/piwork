@@ -111,6 +111,10 @@ export type ProviderModelDefinition =
 
 /** 供应商静态定义：名称、凭据 schema、模型目录与网络权限声明 */
 export type ProviderDefinition = {
+  /** Administrator context limits, preserved independently of packaged catalogs. */
+  contextWindowOverrides?: Record<string, number>;
+  /** Wire protocol for declarative custom providers; executable plugins own their dispatch. */
+  api?: "openai-completions" | "anthropic-messages" | "openai-responses";
   /** provider key，等于 manifest 的 provider 字段（小写 kebab-case） */
   provider: string;
   name: LocalizedText;

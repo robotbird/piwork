@@ -8,6 +8,7 @@ import {
   ChevronDownIcon,
   KeyRoundIcon,
   MoreHorizontalIcon,
+  PencilIcon,
   SearchIcon,
   Settings2Icon,
   ShieldCheckIcon,
@@ -54,12 +55,18 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import {
+  CUSTOM_MODEL_PACKAGE,
+  type CustomModelApi,
+} from "@/lib/admin/custom-models";
+import {
   initialCredentialValues,
   type ModelPluginCatalogItem,
   type ModelPluginInstallationView,
   type ModelPluginsView,
 } from "@/lib/admin/model-plugins";
 import { cn } from "@/lib/utils";
+import { CustomModelApiField } from "./custom-model-api-field";
+import { CustomModelDialog } from "./custom-model-dialog";
 
 type CredentialValues = Record<string, string>;
 
@@ -87,7 +94,7 @@ function ProviderMark({ providerKey }: { providerKey: string }) {
   // 深度求索的既有静态路径一致，源文件来自插件包 _assets 原始图标）；
   // 未提供 logo 文件的供应商回退通用占位图
   const [failedFor, setFailedFor] = useState<string | null>(null);
-  if (failedFor === providerKey) {
+  if (providerKey.startsWith("custom-") || failedFor === providerKey) {
     return (
       <div className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-muted text-foreground">
         <BrainCircuitIcon className="size-5" />
@@ -350,8 +357,32 @@ function ConfigureDialog({
   onSaved: () => Promise<void>;
 }) {
   const { t, language } = usePreferences();
-  const [credentials, setCredentials] = useState<CredentialValues>(() =>
-    initialCredentialValues(installation)
+  const [api, setApi] = useState<CustomModelApi>(
+    installation?.api ?? "openai-completions"
+  );
+  const initialEndpoint =
+    installation?.packageId === CUSTOM_MODEL_PACKAGE
+      ? installation.credentialSummary.endpoint_url ||
+        installation.defaultBaseUrl ||
+        ""
+      : "";
+  const [credentials, setCredentials] = useState<CredentialValues>(() => ({
+    ...initialCredentialValues(installation),
+    ...(installation?.packageId === CUSTOM_MODEL_PACKAGE
+      ? { endpoint_url: initialEndpoint }
+      : {}),
+  }));
+  const [contextWindows, setContextWindows] = useState<Record<string, string>>(
+    {}
+  );
+  const [editingContextId, setEditingContextId] = useState<string | null>(null);
+  const focusContextInput = useCallback((input: HTMLInputElement | null) => {
+    input?.focus();
+    input?.select();
+  }, []);
+  const contextInvalid = Object.values(contextWindows).some(
+    (value) =>
+      !/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 10_000_000
   );
   const [enabledModels, setEnabledModels] = useState<string[]>(
     installation?.enabledModels ?? []
@@ -383,14 +414,32 @@ function ConfigureDialog({
       return;
     }
     setSaving(true);
-    const hasCredentials = Object.values(credentials).some((value) =>
-      value.trim()
+    const credentialChanges = Object.fromEntries(
+      Object.entries(credentials).filter(
+        ([key, value]) =>
+          value.trim() && !(key === "endpoint_url" && value === initialEndpoint)
+      )
     );
+    const hasCredentials = Object.keys(credentialChanges).length > 0;
     const result = await requestJson(
       `/api/admin/model-plugins/${installation.id}`,
       {
         body: JSON.stringify({
-          ...(hasCredentials ? { credentials } : {}),
+          ...(installation.packageId === CUSTOM_MODEL_PACKAGE &&
+          api !== (installation.api ?? "openai-completions")
+            ? { api }
+            : {}),
+          ...(hasCredentials ? { credentials: credentialChanges } : {}),
+          ...(Object.keys(contextWindows).length
+            ? {
+                contextWindows: Object.fromEntries(
+                  Object.entries(contextWindows).map(([id, value]) => [
+                    id,
+                    Number(value),
+                  ])
+                ),
+              }
+            : {}),
           defaultModelId,
           enabledModels,
         }),
@@ -405,7 +454,10 @@ function ConfigureDialog({
     onOpenChange(false);
     await onSaved();
   }, [
+    api,
     credentials,
+    contextWindows,
+    initialEndpoint,
     defaultModelId,
     enabledModels,
     installation,
@@ -441,7 +493,8 @@ function ConfigureDialog({
                   ? t("modelPlugins.keepCurrentApiKey")
                   : t("modelPlugins.apiEndpointProvided")}
               </p>
-              {installation.defaultBaseUrl ? (
+              {installation.defaultBaseUrl &&
+              installation.packageId !== CUSTOM_MODEL_PACKAGE ? (
                 <div className="mb-4 grid gap-2">
                   <Label htmlFor="plugin-default-endpoint">
                     {t("modelPlugins.defaultApiEndpoint")}
@@ -457,6 +510,15 @@ function ConfigureDialog({
                   </p>
                 </div>
               ) : null}
+              {installation.packageId === CUSTOM_MODEL_PACKAGE ? (
+                <div className="mb-4">
+                  <CustomModelApiField
+                    disabled={saving}
+                    onChange={setApi}
+                    value={api}
+                  />
+                </div>
+              ) : null}
               <CredentialFields
                 fields={installation.credentialFields}
                 onChange={changeCredential}
@@ -467,6 +529,11 @@ function ConfigureDialog({
               <h3 className="mb-3 shrink-0 text-sm font-medium">
                 {t("modelPlugins.modelCatalog")}
               </h3>
+              {contextInvalid ? (
+                <p className="mb-3 text-xs text-destructive" role="alert">
+                  {t("modelPlugins.invalidContextWindow")}
+                </p>
+              ) : null}
               <section
                 aria-label={t("modelPlugins.modelCatalog")}
                 className="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-xl border border-border"
@@ -477,7 +544,7 @@ function ConfigureDialog({
                   const enabled = enabledModels.includes(model.modelId);
                   return (
                     <div
-                      className="flex items-center gap-3 border-b border-border/70 px-4 py-3 last:border-b-0"
+                      className="group/model-row flex items-center gap-3 border-b border-border/70 px-4 py-3 last:border-b-0"
                       key={model.modelId}
                     >
                       <Switch
@@ -496,12 +563,70 @@ function ConfigureDialog({
                         <p className="truncate text-xs text-muted-foreground">
                           {model.modelId}
                           {model.modelType === "llm"
-                            ? ` · ${model.properties.contextSize.toLocaleString(language)} ${t("modelPlugins.context")}`
+                            ? ` · ${(Number(contextWindows[model.modelId] ?? model.properties.contextSize)).toLocaleString(language)} ${t("modelPlugins.context")}`
                             : model.pricing
                               ? ` · ${model.pricing.output} ${t("modelPlugins.perImage")}`
                               : ""}
                         </p>
+                        {model.modelType === "llm" &&
+                        editingContextId === model.modelId ? (
+                          <div className="mt-3 grid gap-1.5">
+                            <Label
+                              className="text-xs"
+                              htmlFor={`context-${model.modelId}`}
+                            >
+                              {t("modelPlugins.customContext")}
+                            </Label>
+                            <Input
+                              disabled={saving}
+                              id={`context-${model.modelId}`}
+                              max={10_000_000}
+                              min={1}
+                              onBlur={() => {
+                                if (!contextInvalid) {
+                                  setEditingContextId(null);
+                                }
+                              }}
+                              onChange={(event) => {
+                                const { value } = event.currentTarget;
+                                setContextWindows((current) => ({
+                                  ...current,
+                                  [model.modelId]: value,
+                                }));
+                              }}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  event.currentTarget.blur();
+                                }
+                              }}
+                              ref={focusContextInput}
+                              type="number"
+                              value={
+                                contextWindows[model.modelId] ??
+                                String(model.properties.contextSize)
+                              }
+                            />
+                          </div>
+                        ) : null}
                       </div>
+                      {model.modelType === "llm" ? (
+                        <Button
+                          aria-label={t("modelPlugins.editContextWindow", {
+                            model: model.modelId,
+                          })}
+                          className="shrink-0 opacity-0 transition-opacity group-hover/model-row:opacity-100 group-focus-within/model-row:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+                          disabled={saving}
+                          onClick={() => setEditingContextId(model.modelId)}
+                          size="icon"
+                          title={t("modelPlugins.editContextWindow", {
+                            model: model.modelId,
+                          })}
+                          variant="ghost"
+                        >
+                          <PencilIcon className="size-3.5" />
+                        </Button>
+                      ) : null}
                       <Button
                         disabled={
                           !installation.credentialsConfigured || !enabled
@@ -537,6 +662,7 @@ function ConfigureDialog({
           <Button
             disabled={
               saving ||
+              contextInvalid ||
               (!installation?.credentialsConfigured && !hasCredentialInput)
             }
             onClick={save}
@@ -556,6 +682,7 @@ export function ModelsPage({ initialData }: { initialData: ModelPluginsView }) {
   const { t, language } = usePreferences();
   const [data, setData] = useState(initialData);
   const [query, setQuery] = useState("");
+  const [customOpen, setCustomOpen] = useState(false);
   const [installTarget, setInstallTarget] =
     useState<ModelPluginCatalogItem | null>(null);
   const [configureTarget, setConfigureTarget] =
@@ -659,6 +786,9 @@ export function ModelsPage({ initialData }: { initialData: ModelPluginsView }) {
             <p className="mt-2 text-sm text-muted-foreground">
               {t("modelPlugins.pageDescription")}
             </p>
+            <Button className="mt-4" onClick={() => setCustomOpen(true)}>
+              {t("modelPlugins.customAdd")}
+            </Button>
           </header>
 
           <section className="mt-7 overflow-hidden rounded-2xl border border-border bg-card">
@@ -933,6 +1063,12 @@ export function ModelsPage({ initialData }: { initialData: ModelPluginsView }) {
           </section>
         </div>
       </section>
+      <CustomModelDialog
+        key={String(customOpen)}
+        onOpenChange={setCustomOpen}
+        onSaved={refresh}
+        open={customOpen}
+      />
       <InstallDialog
         item={installTarget}
         onInstalled={refresh}

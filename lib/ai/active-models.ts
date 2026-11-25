@@ -27,10 +27,14 @@ export type ActiveModelCatalog = {
   models: (ChatModel & { capabilities: ModelCapabilities })[];
 };
 
-/** 目录缓存的存活时长：管理端变更最迟在该时长后对聊天生效 */
+/** Reuse derived catalog entries only while their provider snapshot is current. */
 const CATALOG_TTL_MS = 30_000;
 
-let cache: { catalog: ActiveModelCatalog; expiresAt: number } | null = null;
+let cache: {
+  catalog: ActiveModelCatalog;
+  expiresAt: number;
+  plugins: PluginInstallationRuntime[];
+} | null = null;
 
 /** 客户端与接口共用的模型标识："{供应商名}/{Model ID}" */
 export function compositeModelId(
@@ -86,10 +90,10 @@ export async function getActiveModelCatalog(): Promise<ActiveModelCatalog> {
   if (isTestEnvironment) {
     return buildTestCatalog();
   }
-  if (cache && Date.now() < cache.expiresAt) {
+  const plugins = await loadPluginInstallations();
+  if (cache?.plugins === plugins && Date.now() < cache.expiresAt) {
     return cache.catalog;
   }
-  const plugins = await loadPluginInstallations();
   const catalog: ActiveModelCatalog = {
     defaultModelId: null,
     models: plugins.flatMap((plugin) => pluginCatalogModels(plugin)),
@@ -134,12 +138,8 @@ export async function getActiveModelCatalog(): Promise<ActiveModelCatalog> {
     });
   }
   catalog.models = [...virtualEntries, ...catalog.models];
-  cache = { catalog, expiresAt: Date.now() + CATALOG_TTL_MS };
+  cache = { catalog, expiresAt: Date.now() + CATALOG_TTL_MS, plugins };
   return catalog;
-}
-
-export function invalidateActiveModelCatalog(): void {
-  cache = null;
 }
 
 /** 插件目录模型 → 聊天模型条目（能力来自插件 definition；image 模型不进聊天目录） */

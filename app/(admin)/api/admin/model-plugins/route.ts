@@ -1,6 +1,5 @@
 import { getTranslations } from "next-intl/server";
 import { requireAdminRole } from "@/lib/admin/access";
-import { invalidateActiveModelCatalog } from "@/lib/ai/active-models";
 import {
   createPluginInstallation,
   getPluginInstallationByProviderKey,
@@ -82,7 +81,6 @@ export async function POST(request: Request) {
       version: pluginPackage.version,
     });
     resetPluginRegistry();
-    invalidateActiveModelCatalog();
     return Response.json({ id: record.id }, { status: 201 });
   } catch (error) {
     return errorResponse(error);
