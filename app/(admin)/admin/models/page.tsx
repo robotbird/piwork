@@ -9,8 +9,8 @@ import { loadModelPluginsView } from "@/lib/model-plugins/view";
 async function PermissionNotice() {
   const t = await getTranslations("admin");
   return (
-    <section className="min-w-0 px-5 py-8 sm:px-8 md:px-10 md:py-14 lg:px-12 lg:py-16">
-      <div className="mx-auto max-w-[960px]">
+    <section className="min-w-0">
+      <div className="mx-auto min-w-0 max-w-[960px]">
         <h1 className="text-2xl font-semibold tracking-[-0.025em]">
           {t("modelManagement")}
         </h1>

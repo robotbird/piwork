@@ -446,8 +446,8 @@ export function DashboardOverview({
 
   if (!overview) {
     return (
-      <main className="min-w-0 flex-1 bg-background px-5 py-8 sm:px-8 md:px-10 md:py-14 lg:px-12 lg:py-16">
-        <div className="mx-auto max-w-[1180px]">
+      <section className="min-w-0">
+        <div className="min-w-0">
           <header>
             <h1 className="text-2xl font-semibold tracking-[-0.025em] text-foreground">
               {t("dashboard.overview")}
@@ -471,7 +471,7 @@ export function DashboardOverview({
             </div>
           )}
         </div>
-      </main>
+      </section>
     );
   }
 
@@ -495,8 +495,8 @@ export function DashboardOverview({
       : "partial";
 
   return (
-    <main className="min-w-0 flex-1 bg-background px-5 py-8 sm:px-8 md:px-10 md:py-14 lg:px-12 lg:py-16">
-      <div className="mx-auto max-w-[1180px]">
+    <section className="min-w-0">
+      <div className="min-w-0">
         <header className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-[-0.025em] text-foreground">
@@ -885,6 +885,6 @@ export function DashboardOverview({
           </article>
         </section>
       </div>
-    </main>
+    </section>
   );
 }

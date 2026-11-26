@@ -51,7 +51,9 @@ async function AuthenticatedAdmin({ children }: { children: React.ReactNode }) {
         }}
       />
       <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain">
-        {children}
+        <main className="mx-auto w-full min-w-0 max-w-[1600px] p-4 md:p-8">
+          {children}
+        </main>
       </div>
     </div>
   );

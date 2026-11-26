@@ -110,10 +110,12 @@ export function SandboxSettingsPage({
   );
 
   return (
-    <section className="min-w-0 px-5 py-8 sm:px-8 md:px-10 md:py-14">
-      <div className="mx-auto flex max-w-[960px] flex-col gap-6">
+    <section className="min-w-0">
+      <div className="mx-auto flex min-w-0 max-w-[960px] flex-col gap-5">
         <header className="flex flex-col gap-2">
-          <h1 className="text-heading-lg">{t("title")}</h1>
+          <h1 className="text-2xl font-semibold tracking-[-0.025em]">
+            {t("title")}
+          </h1>
           <p className="text-sm text-muted-foreground">{t("description")}</p>
         </header>
         <Card>

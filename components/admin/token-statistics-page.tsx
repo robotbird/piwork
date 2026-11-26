@@ -235,7 +235,7 @@ export function TokenStatisticsPage({
     </div>
   );
   return (
-    <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-5 p-4 md:p-8">
+    <section className="flex min-w-0 flex-col gap-5">
       <header className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold tracking-[-0.025em]">
           {t("title")}
@@ -482,9 +482,8 @@ export function TokenStatisticsPage({
               )}
             </div>
           </Panel>
-          <p className="text-xs leading-6 text-muted-foreground">{t("note")}</p>
         </>
       )}
-    </main>
+    </section>
   );
 }

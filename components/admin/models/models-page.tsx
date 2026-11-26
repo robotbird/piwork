@@ -777,10 +777,10 @@ export function ModelsPage({ initialData }: { initialData: ModelPluginsView }) {
 
   return (
     <>
-      <section className="min-w-0 px-5 py-8 sm:px-8 md:px-10 md:py-12 lg:px-12">
-        <div className="mx-auto max-w-[1120px]">
+      <section className="min-w-0">
+        <div className="mx-auto min-w-0 max-w-[960px]">
           <header>
-            <h1 className="text-3xl font-semibold tracking-[-0.04em]">
+            <h1 className="text-2xl font-semibold tracking-[-0.025em]">
               {t("modelPlugins.modelProviders")}
             </h1>
             <p className="mt-2 text-sm text-muted-foreground">

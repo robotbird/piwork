@@ -276,8 +276,8 @@ export function McpServersPage({
   );
 
   return (
-    <section className="min-w-0 px-5 py-8 sm:px-8 md:px-10 md:py-14 lg:px-12 lg:py-16">
-      <div className="mx-auto max-w-[960px]">
+    <section className="min-w-0">
+      <div className="mx-auto min-w-0 max-w-[960px]">
         <header className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-[-0.025em]">

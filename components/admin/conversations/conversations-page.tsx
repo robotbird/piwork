@@ -467,8 +467,8 @@ export function ConversationsPage({
     "actions",
   ];
   return (
-    <section className="min-w-0 px-5 py-8 sm:px-8 md:px-10 md:py-14 lg:px-12 lg:py-16">
-      <div className="mx-auto flex max-w-[1280px] flex-col gap-7">
+    <section className="min-w-0">
+      <div className="flex min-w-0 flex-col gap-5">
         <header>
           <h1 className="text-2xl font-semibold tracking-[-0.025em]">
             {t("heading")}
@@ -837,7 +837,6 @@ export function ConversationsPage({
             </SheetContent>
           </Sheet>
         </div>
-        <p className="text-xs leading-5 text-muted-foreground">{t("notice")}</p>
         <Dialog onOpenChange={setFull} open={full}>
           <DialogContent className="flex max-h-[85dvh] flex-col sm:max-w-[760px]">
             <DialogHeader>

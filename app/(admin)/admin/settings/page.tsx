@@ -47,10 +47,10 @@ export default function GeneralSettingsPage() {
   );
 
   return (
-    <main className="min-w-0 flex-1 bg-background px-5 py-6 sm:px-8">
-      <div className="mx-auto max-w-3xl">
+    <section className="min-w-0">
+      <div className="mx-auto min-w-0 max-w-[960px]">
         <header>
-          <h1 className="text-2xl font-medium leading-8 tracking-tight text-foreground">
+          <h1 className="text-2xl font-semibold tracking-[-0.025em]">
             {t("generalSettings")}
           </h1>
           <p className="mt-1 text-sm leading-5 text-muted-foreground">
@@ -126,6 +126,6 @@ export default function GeneralSettingsPage() {
         </section>
         <UploadSettingsSection />
       </div>
-    </main>
+    </section>
   );
 }

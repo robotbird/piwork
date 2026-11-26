@@ -544,10 +544,10 @@ export function SandboxesPage({
   );
 
   return (
-    <section className="min-w-0 px-5 pb-8 pt-8 sm:px-8 sm:pt-18 lg:px-9">
+    <section className="min-w-0">
       <header className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-[30px] font-semibold tracking-tight">
+          <h1 className="text-2xl font-semibold tracking-[-0.025em]">
             {t("sandboxes.title")}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
