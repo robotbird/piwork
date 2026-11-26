@@ -39,6 +39,7 @@ import {
 import { forEachSkillFile } from "./skill-file-operations";
 import type { SkillInstallLink } from "./skill-install-link";
 import { SKILL_LIMIT_MB, SKILL_LIMITS } from "./skill-limits";
+import { buildSkillInstructionsPrompt } from "./skill-prompts";
 
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MAX_DESCRIPTION_LENGTH = 1024;
@@ -1238,14 +1239,9 @@ export async function readProjectSkillFile(
 }
 
 export function buildSkillsSystemPrompt(skills: Skill[]) {
-  const availableSkills = formatSkillsForPrompt(skills);
+  const availableSkills = formatSkillsForPrompt(skills, "indirect");
 
-  return [
-    "Skills are reusable, on-demand instruction packages.",
-    "When a request matches an available skill, call load_skill before answering and follow the returned instructions.",
-    "When the user asks to create a reusable skill, call create_skill with complete, actionable Markdown instructions.",
-    availableSkills,
-  ]
+  return [buildSkillInstructionsPrompt(skills, "load_skill"), availableSkills]
     .filter(Boolean)
     .join("\n\n");
 }

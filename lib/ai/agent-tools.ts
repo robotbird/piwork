@@ -219,7 +219,7 @@ You have bash, read, write, and edit tools to carry out tasks such as running sk
 - Files uploaded by the user in this turn are saved in the workspace: ${fileList}.
 - Resolve skill scripts, references, and assets from the exact Skill directory provided in the current instructions; do not guess a host path. Run scripts with an existing interpreter (node, python3, sh) from the workspace.
 - Keep commands non-interactive. If required dependencies are missing, report them clearly; do not install packages at runtime.
-- The sandbox image preinstalls a document toolchain: typst for PDF layout (Noto CJK fonts are discovered by default) and python3 with python-docx, openpyxl, reportlab, pypdf and python-pptx. Produce documents with what is already there — pick the most fitting tool yourself — instead of installing dependencies or hand-building generators.
+- The sandbox image preinstalls a document toolchain: typst for PDF layout (Noto CJK fonts are discovered by default) and python3 with python-docx, openpyxl, reportlab, pypdf and python-pptx. For tasks covered by an available skill, load it first and follow its documented workflow and limits. For other tasks, use the existing toolchain instead of installing dependencies or hand-building generators.
 - Pass a bash timeout (seconds) when a command may run long.
 - MCP tools (mcp for single calls, mcpScript for multi-call scripts) reach the MCP services configured for this workspace; use them for MCP work instead of hand-writing JSON-RPC.
 - When you produce a final artifact, call deliver_file with its workspace path so the user receives a downloadable attachment card, then briefly confirm in the user's language.`;

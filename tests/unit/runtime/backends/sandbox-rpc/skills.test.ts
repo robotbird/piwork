@@ -265,13 +265,21 @@ test("PPT-style resources cross former 500/512 file limits without truncation", 
 test("remote prompt removes host catalog and rebases only generated workspace instructions", async () => {
   const f = await fixture();
   try {
+    const skills = [
+      ...f.skills,
+      { ...f.skills[0], name: "office-routing" },
+      { ...f.skills[0], name: "office-documents" },
+      { ...f.skills[0], name: "piwork-brand-design" },
+      { ...f.skills[0], name: "piwork-creative-core" },
+      { ...f.skills[0], disableModelInvocation: true, name: "pdf" },
+    ];
     const spec = {
       appendSystemPrompt: [
-        buildSkillsSystemPrompt(f.skills),
+        buildSkillsSystemPrompt(skills),
         "unchanged custom text",
         "## Workspace and execution tools\n- Your working directory (workspace) is: /host/workspace.",
       ],
-      skills: f.skills,
+      skills,
       workspaceDir: "/host/workspace",
     } as RuntimeSpec;
     const prompt = sandboxSkillsPrompt(spec, "/workspace").join("\n");
@@ -279,6 +287,14 @@ test("remote prompt removes host catalog and rebases only generated workspace in
     assert(!prompt.includes("/host/workspace"));
     assert(prompt.includes("unchanged custom text"));
     assert(prompt.includes("read to load"));
+    assert(!prompt.includes("Call load_skill"));
+    assert(!prompt.includes("call create_skill"));
+    assert(!prompt.includes("<available_skills>"));
+    assert(prompt.includes("load office-routing first"));
+    assert(prompt.includes("Use office-documents"));
+    assert(prompt.includes("load piwork-brand-design"));
+    assert(prompt.includes("piwork-creative-core"));
+    assert(!prompt.includes("Use pdf"));
   } finally {
     await rm(f.root, { force: true, recursive: true });
   }

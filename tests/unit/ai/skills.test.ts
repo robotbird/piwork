@@ -14,6 +14,7 @@ import { zipSync } from "fflate";
 import { parseSkillInstallLink } from "../../../lib/ai/skill-install-link.ts";
 import { SKILL_LIMITS } from "../../../lib/ai/skill-limits";
 import {
+  buildSkillsSystemPrompt,
   createProjectSkill,
   deleteProjectSkill,
   extractProjectSkillArchive,
@@ -57,6 +58,11 @@ test("creates and discovers a standard Pi skill", async () => {
     assert.equal(loaded.diagnostics.length, 0);
     assert.equal(loaded.skills.length, 1);
     assert.equal(loaded.skills[0]?.name, "weekly-recap");
+
+    const prompt = buildSkillsSystemPrompt(loaded.skills);
+    assert(prompt.includes("<name>weekly-recap</name>"));
+    assert(prompt.includes("Call load_skill"));
+    assert(!prompt.includes("Use the read tool to load a skill"));
 
     const summaries = await loadProjectSkillSummaries(cwd);
     assert.equal(summaries.skills[0]?.displayName, "Weekly Recap");

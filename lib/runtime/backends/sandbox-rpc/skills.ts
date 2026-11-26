@@ -12,6 +12,7 @@ import {
   isCommentOnlySkillEnvExample,
   SKILL_LIMITS,
 } from "@/lib/ai/skill-limits";
+import { buildSkillInstructionsPrompt } from "@/lib/ai/skill-prompts";
 import { buildSkillsSystemPrompt } from "@/lib/ai/skills";
 import type { RuntimeSpec } from "../../protocol";
 import {
@@ -298,6 +299,7 @@ export function sandboxSkillsPrompt(
             )
           : segment
       ),
-    "Skills are available through the sandbox-local SKILL.md paths advertised below. Use read to load their instructions; load_skill and create_skill host tools are not available here. Resolve scripts/references/assets relative to that skill directory, not the host. Run scripts with an existing node/python/sh interpreter. Missing dependencies must be reported; do not install packages. Your actual working directory is the sandbox workspace; write outputs there and use deliver_file for downloads.",
+    buildSkillInstructionsPrompt(spec.skills ?? [], "read"),
+    "Run skill scripts with an existing node/python/sh interpreter. Missing dependencies must be reported; do not install packages. Your actual working directory is the sandbox workspace; write outputs there and use deliver_file for downloads.",
   ];
 }
